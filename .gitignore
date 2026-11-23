@@ -1,0 +1,18 @@
+﻿# build artifacts
+bin/
+obj/
+
+# logs / scratch
+*.log
+push_*.txt
+
+# screenshots / local reference material (not shipped)
+shot_*.png
+docs/reference/
+
+# tooling / installer leftovers
+winsdk*
+bt_install*
+
+# editor
+.claude/
