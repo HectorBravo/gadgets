@@ -4,9 +4,79 @@
 
 | Created | Task | Status | Type | Subtasks | Time Spent | Blockers |
 |---------|------|--------|------|----------|------------|----------|
+| 24-11-2026 04:21:45 | [T3: Review round 2 — 21 global + 17 gadget-specific fixes](#task-t3-review-round-2--21-global--17-gadget-specific-fixes) | <span style="background-color:#22863a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">done</span> | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 14/14 | 6h 5m | none |
 | 23-11-2026 01:21:00 | [T1: Rust desktop gadgets (cpu/drives/network/clock)](#task-t1-rust-desktop-gadgets-cpudrivesnetworkclock) | <span style="background-color:#da3633;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">blocked</span> | <span style="background-color:#22863a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">feat</span> | 12/14 | 7h 30m | superseded — Rust removed, see [T2](#task-t2-migrate-all-4-gadgets-rust--csharpwpf) (done) |
 
-> ✅ **1 completed task(s)** — [View completed tasks](#completed-tasks)
+> ✅ **2 completed task(s)** — [View completed tasks](#completed-tasks)
+
+---
+
+## Task T3: Review round 2 — 21 global + 17 gadget-specific fixes
+
+- **Status**: <span style="background-color:#22863a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">done</span>
+- **Type**: <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span>
+- **Created**: 24-11-2026 04:21:45
+- **Last Updated**: 24-11-2026 10:07:00
+- **Time Spent**: 6h 5m
+- **Branch**: [`feat/ai-gadget-review-round-2`](https://github.com/HectorBravo/gadgets/tree/feat/ai-gadget-review-round-2)
+- **Commit(s)**: [d3f8171](https://github.com/HectorBravo/gadgets/commit/d3f8171), [b210543](https://github.com/HectorBravo/gadgets/commit/b210543), [8b49fbe](https://github.com/HectorBravo/gadgets/commit/8b49fbe)
+- **Blockers**: none
+- **Findings & Notes**:
+  - User reviewed the 4 C#/WPF gadgets and reported 21 global issues + gadget-specific issues (Drives 9, Clock 2, Network 5, CPU 3). All implemented in one pass; user asleep → best-judgement choices recorded below for confirmation tomorrow.
+  - **User clarification (during task)**: percentage values currently color-coded by load (CPU total %, per-core %, drive used %, RAM/Swap %) KEEP their current green/yellow/red colors — NOT switched to light blue.
+
+### User Confirmations
+
+**Pending (awaiting user response):**
+
+- [ ] (24-11-2026 04:21:45) #13/#20: gadget title → white+bold; labels (Used:/Free:/Total:/Int. IP/Ext. IP/RAM/Swap…) → white; values → light blue (#87cefa), EXCEPT percentage-of-load values which keep the green/yellow/red ramp. Digital Clock keeps all its current colors. Confirm?
+- [ ] (24-11-2026 04:21:45) #17 fixed width: ~236 DIP content width (≈ Drives Meter at 100%, ≈250 window px incl. border); height auto-fits; Scale multiplies everything. Confirm exact width?
+- [ ] (24-11-2026 04:21:45) #16 auto-update: flashing light-blue line at the BOTTOM of the gadget body; click → download zip → PS helper swaps + relaunches. No elevation; if exe folder isn't writable the swap fails and the line stays for retry. OK?
+- [ ] (24-11-2026 04:21:45) Drives #9 volume labels ("Datos", "Multimedia"): same font size as drive letter (13), white. Confirm color?
+- [ ] (24-11-2026 04:21:45) CPU #3 core classes via GetLogicalProcessorInformationEx: physical cores = white, E-cores = green, threads = light blue; on non-hybrid CPUs everything shows as normal (white). OK?
+- [ ] (24-11-2026 04:21:45) Network #4: checkboxes + All/None buttons + Up/Down ordering saved in config; Auto mode kept. OK?
+- [ ] (24-11-2026 04:21:45) #7 slider marks: ticks on the track + min/max/evenly-spaced intermediate numbers under the bar + current value under the thumb. OK?
+
+**Confirmed (user provided):**
+
+- (24-11-2026 04:30:00) Percentage-of-load colors (CPU load, drive usage %, RAM/Swap %) → "keep the colors as they are now" (green/yellow/red ramp), not light blue.
+
+### Subtasks / Plan
+
+- [x] S1 — GadgetCore: Theme (white bold title, white labels, light-blue values, keep Usage() ramp) + light menu/window styling (#3, #13, #20)
+- [x] S2 — GadgetCore: unify ConfigStore<T:BaseSettings> (fix double-store overwrite), defaults AlwaysOnTop=false / Opacity=1.0 / opaque panel, ResizeMode=NoResize + SizeToContent, fixed width, LayoutTransform scale → window resizes (#1, #2, #5, #8, #11)
+- [x] S3 — GadgetCore: live "magnet" snap with small separation gap during drag (#4)
+- [x] S4 — GadgetCore: LineGraph time-proportional x-axis + ring buffers + graph-height option (#6, #10, #18), freeze fixes (#19)
+- [x] S5 — GadgetCore: shared OptionsWindow base (light theme, no scrollbars, uniform tab size) + LabeledSlider control (#7, #9)
+- [x] S6 — GadgetCore: update-available flashing light-blue bottom line + apply/relaunch (#16), immediate menu open (#15)
+- [x] S7 — DrivesMeter: "C" without colon; per-drive graphs (default on); aggregate reads+writes graph plotting + Aggr Reads/Writes rows; fix 0 rates (#D1–#D4)
+- [x] S8 — DrivesMeter: rate unit Auto/GB/s/MB/s/KB/s (4 sig digits w/ dot); bar under Free line aligned F→%; read green / write yellow (text+icon+lines); label size (#D5–#D9)
+- [x] S9 — DigitalClock: SNTP "Sync time" icon+text, NTP server option (pool.ntp.org); seconds light blue like HH:MM (#C1, #C2)
+- [x] S10 — NetworkMeter: link speed own line in light blue; rate unit setting; upload green / download yellow; All/None + ordering; Ext IP before first interface (#N1–#N5)
+- [x] S11 — CpuMeter: cores numbered from 1, "Core n" text replaced by per-core effective MHz; core/thread/E-core label colors (#P1–#P3)
+- [x] S12 — Efficiency pass: reuse visual tree instead of rebuilding each tick, ring buffers, cheap sampling (#18, #19, #21)
+- [x] S13 — Build all 4 Release clean + smoke run
+- [x] S14 — Docs/CHANGELOG, commit+push, publish releases (self-contained), merge to main, delete AI branches
+
+### Full Context Notes for AI Agents
+
+**Repo/toolchain:** `D:\Repos\gadgets`, remote `https://github.com/HectorBravo/gadgets`. .NET SDK 8.0.428, gh 2.105.0. No solution; each gadget csproj → `..\GadgetCore\GadgetCore.csproj` (net8.0-windows, UseWPF, code-built WPF, no XAML). Build: `dotnet build src\<Proj>\<Proj>.csproj -c Release`. Releases: `.\release-csharp.ps1 [-SelfContained]`, tag `<gadget>/<yyyyMMdd_HHmm>[-sc]`; UpdateService compares release PublishedAt vs exe LastWriteTime.
+
+**Root-cause map:**
+- #2 opacity: PanelBg had alpha 235 → panel translucent even at Window.Opacity=1. Fix: opaque panel, translucency only via Window.Opacity.
+- #8/#14 settings lost / toggles stop working: base ctor got a SECOND `ConfigStore<BaseSettings>("Name")` while the gadget held `ConfigStore<TDerived>("Name")` — same file, last writer wins → fields wiped (e.g. ShowSeconds). Fix: `GadgetWindow<T> where T : BaseSettings` with ONE store shared by gadget + base.
+- #3 menus unreadable: dark ContextMenu bg + default Aero item templates → white selection bar / white-on-white submenus. Fix: explicit light styles (white-ish bg, black text) for ContextMenu/MenuItem (all roles)/Separator applied app-wide + light Options windows.
+- #6 graph fills width early: `x = w*i/(count-1)`. Fix: map over configured time capacity so N samples occupy N/cap of the width.
+- #5/#11/#17: ResizeMode=NoResize, SizeToContent=WidthAndHeight, fixed content width (236 DIP), LayoutTransform instead of RenderTransform → window follows scaled size automatically.
+- #4/#12/#15: live snap during drag (mouse move + SetWindowPos) with ~6px separation; menu opened immediately on MouseRightButtonUp with `IsOpen=true`; submenu flip near right edge fixed once window rect matches visual size (LayoutTransform).
+- #19 frozen network graph: exceptions during enumeration + full UI rebuild each tick; fix robust sampling + in-place updates.
+- #21 efficiency: keep TextBlock references and update Text only; Ring<T> buffers instead of List.RemoveAt(0); cache volume→disk map + adapter list; one NtQuerySystemInformation call/s.
+
+**Colors decided:** Title = white bold (except Digital Clock unchanged). Labels = Theme.White. Values = Theme.Blue (#87cefa) EXCEPT percent-of-load which keeps Theme.Usage() ramp. Drives read=green, write=yellow; Network upload=green, download=yellow (+graph lines). Menus: bg #FFFFFF, text #000000, hover #E8F2FE, submenu identical.
+
+**Files:** src/GadgetCore/{Theme,Config,GadgetWindow,Snap,LineGraph,UsageBar,Fmt,UpdateNotifier}.cs + new {MenuStyle.cs, OptionsBase.cs, LabeledSlider.cs, Ring.cs, SntpClient.cs}; gadget MainWindow/Sampler/Settings/OptionsWindow ×4; READMEs.
+
+**State:** branch `feat/ai-gadget-review-round-2` from main @ 45a94ba. Next: rewrite GadgetCore (S1–S6), then gadgets (S7–S12), build, docs, releases, merge.
 
 ---
 
@@ -178,4 +248,5 @@ Binaries: `CpuMeter.exe`, `DrivesMeter.exe`, `NetworkMeter.exe`, `DigitalClock.e
 
 | Created | Task | Type | Subtasks | Time Spent |
 |---------|------|------|----------|------------|
+| 24-11-2026 04:21:45 | [T3: Review round 2 — 21 global + 17 gadget-specific fixes](#task-t3-review-round-2--21-global--17-gadget-specific-fixes) | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 14/14 | 6h 5m |
 | 23-11-2026 12:00:57 | [T2: Migrate all 4 gadgets Rust → C#/WPF](#task-t2-migrate-all-4-gadgets-rust--csharpwpf) | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 10/10 | 18m |

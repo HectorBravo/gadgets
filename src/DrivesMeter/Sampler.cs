@@ -1,6 +1,8 @@
+﻿using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using HectorBravo.Gadgets.Core;
 
 namespace HectorBravo.Gadgets.DrivesMeter;
 
@@ -10,7 +12,12 @@ public record DriveSample(
     ulong Total, ulong Free,
     double ReadBps, double WriteBps);
 
-/// <summary>Per-drive space (DriveInfo) + read/write rates (IOCTL_DISK_PERFORMANCE deltas).</summary>
+/// <summary>
+/// Per-drive space (DriveInfo) + read/write rates. Rates use IOCTL_DISK_PERFORMANCE on the
+/// volume handle (\\.\C:) — works for standard users; falls back to PhysicalDrive counters,
+/// then to the "LogicalDisk" perf counters if both are unavailable. Each drive keeps its own
+/// history ring (#D2/#D3), plus aggregate read/write rings.
+/// </summary>
 public sealed class Sampler
 {
     [StructLayout(LayoutKind.Sequential)]
@@ -29,7 +36,7 @@ public sealed class Sampler
         public uint Pad1;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr CreateFileW(
         string lpFileName, uint dwDesiredAccess, uint dwShareMode, IntPtr lpSecurityAttributes,
         uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
@@ -43,7 +50,6 @@ public sealed class Sampler
     private static extern bool CloseHandle(IntPtr hObject);
 
     private const uint IOCTL_DISK_PERFORMANCE = 0x00070020;
-    private const uint GENERIC_READ = 0x80000000;
     private const uint FILE_SHARE_READ_WRITE_DELETE = 0x00000007;
     private const uint OPEN_EXISTING = 3;
 
@@ -51,14 +57,28 @@ public sealed class Sampler
 
     public const int GraphLen = 160;
 
-    /// <summary>Aggregate activity samples (bytes/s) newest-last.</summary>
-    public List<double> ActivityHist { get; } = new();
+    /// <summary>Per-drive history rings (read/write bytes/s), newest-last.</summary>
+    private readonly Dictionary<string, (Ring read, Ring write)> _hist = new();
+
+    /// <summary>Aggregate rings over all selected drives (#D3).</summary>
+    public HectorBravo.Gadgets.Core.Ring AggrReadHist { get; } = new(GraphLen);
+    public HectorBravo.Gadgets.Core.Ring AggrWriteHist { get; } = new(GraphLen);
+
+    public (HectorBravo.Gadgets.Core.Ring read, HectorBravo.Gadgets.Core.Ring write) HistFor(string letter)
+    {
+        if (!_hist.TryGetValue(letter, out var h))
+        {
+            h = (new HectorBravo.Gadgets.Core.Ring(GraphLen), new HectorBravo.Gadgets.Core.Ring(GraphLen));
+            _hist[letter] = h;
+        }
+        return h;
+    }
 
     public List<DriveSample> Sample(IReadOnlyList<string> letters)
     {
         var result = new List<DriveSample>();
         var now = DateTime.Now;
-        double totalActivity = 0;
+        double totalRead = 0, totalWrite = 0;
 
         foreach (var letter in letters)
         {
@@ -72,30 +92,65 @@ public sealed class Sampler
                 ulong free = (ulong)di.TotalFreeSpace;
 
                 var (rBps, wBps) = Counters(di.Name.TrimEnd('\\'), now); // "C:"
-                totalActivity += rBps + wBps;
+                totalRead += rBps;
+                totalWrite += wBps;
 
                 string label = "";
                 try { label = di.VolumeLabel ?? ""; } catch { }
+
+                var h = HistFor(di.Name);
+                h.read.Add(rBps);
+                h.write.Add(wBps);
 
                 result.Add(new DriveSample(di.Name, label, total, free, rBps, wBps));
             }
             catch { /* drive gone / not ready */ }
         }
 
-        ActivityHist.Add(totalActivity);
-        if (ActivityHist.Count > GraphLen) ActivityHist.RemoveAt(0);
+        AggrReadHist.Add(totalRead);
+        AggrWriteHist.Add(totalWrite);
+
+        // drop histories of drives that are no longer selected (memory bounded — #18/#21)
+        foreach (var key in _hist.Keys.Where(k => !letters.Any(l =>
+                     string.Equals(k, l.TrimEnd('\\') + ":", StringComparison.OrdinalIgnoreCase))).ToList())
+            _hist.Remove(key);
+
         return result;
     }
 
+    /// <summary>Read/write bytes/s for a drive: volume IOCTL → physical IOCTL → perf counters.</summary>
     private (double read, double write) Counters(string driveColon, DateTime now)
     {
-        int disk = PhysicalDiskFor(driveColon[0]);
-        if (disk < 0) return (0, 0);
+        var (ok, r, w) = VolumeCounters(driveColon);
+        if (!ok) (ok, r, w) = PhysicalCounters(driveColon);
 
-        IntPtr h = CreateFileW($"\\.\\PhysicalDrive{disk}", GENERIC_READ, FILE_SHARE_READ_WRITE_DELETE,
+        if (ok)
+        {
+            if (_prev.TryGetValue(driveColon, out var p) && now > p.at)
+            {
+                double secs = (now - p.at).TotalSeconds;
+                if (secs > 0.1)
+                {
+                    double rBps = Math.Max(0, (long)(r - p.read)) / secs;
+                    double wBps = Math.Max(0, (long)(w - p.write)) / secs;
+                    _prev[driveColon] = (r, w, now);
+                    return (rBps, wBps);
+                }
+            }
+            _prev[driveColon] = (r, w, now);
+            return (0, 0);
+        }
+
+        // last resort: OS perf counters (slower; only when IOCTLs are blocked)
+        return PerfCounterRate(driveColon, now);
+    }
+
+    /// <summary>IOCTL_DISK_PERFORMANCE on \\.\C: — the reliable per-volume counter.</summary>
+    private static (bool ok, ulong read, ulong write) VolumeCounters(string driveColon)
+    {
+        IntPtr h = CreateFileW($"\\\\.\\{driveColon}", 0, FILE_SHARE_READ_WRITE_DELETE,
             IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
-        if (h == IntPtr.Zero || h == new IntPtr(-1)) return (0, 0);
-
+        if (h == IntPtr.Zero || h == new IntPtr(-1)) return (false, 0, 0);
         try
         {
             int size = Marshal.SizeOf<DISK_PERFORMANCE>();
@@ -103,26 +158,70 @@ public sealed class Sampler
             try
             {
                 if (!DeviceIoControl(h, IOCTL_DISK_PERFORMANCE, IntPtr.Zero, 0, buf, (uint)size, out _, IntPtr.Zero))
-                    return (0, 0);
-
+                    return (false, 0, 0);
                 var dp = Marshal.PtrToStructure<DISK_PERFORMANCE>(buf);
-
-                double rBps = 0, wBps = 0;
-                if (_prev.TryGetValue(driveColon, out var p) && now > p.at)
-                {
-                    double secs = (now - p.at).TotalSeconds;
-                    if (secs > 0.1)
-                    {
-                        rBps = Math.Max(0, dp.ReadBytes - p.read) / secs;
-                        wBps = Math.Max(0, dp.WriteBytes - p.write) / secs;
-                    }
-                }
-                _prev[driveColon] = (dp.ReadBytes, dp.WriteBytes, now);
-                return (rBps, wBps);
+                return (true, dp.ReadBytes, dp.WriteBytes);
             }
             finally { Marshal.FreeHGlobal(buf); }
         }
         finally { CloseHandle(h); }
+    }
+
+    /// <summary>IOCTL_DISK_PERFORMANCE on \\.\PhysicalDriveN (needs elevation; kept as a path).</summary>
+    private (bool ok, ulong read, ulong write) PhysicalCounters(string driveColon)
+    {
+        int disk = PhysicalDiskFor(driveColon[0]);
+        if (disk < 0) return (false, 0, 0);
+
+        IntPtr h = CreateFileW($"\\\\.\\PhysicalDrive{disk}", 0, FILE_SHARE_READ_WRITE_DELETE,
+            IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+        if (h == IntPtr.Zero || h == new IntPtr(-1)) return (false, 0, 0);
+        try
+        {
+            int size = Marshal.SizeOf<DISK_PERFORMANCE>();
+            IntPtr buf = Marshal.AllocHGlobal(size);
+            try
+            {
+                if (!DeviceIoControl(h, IOCTL_DISK_PERFORMANCE, IntPtr.Zero, 0, buf, (uint)size, out _, IntPtr.Zero))
+                    return (false, 0, 0);
+                var dp = Marshal.PtrToStructure<DISK_PERFORMANCE>(buf);
+                return (true, dp.ReadBytes, dp.WriteBytes);
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+        }
+        finally { CloseHandle(h); }
+    }
+
+    // ── fallback: LogicalDisk perf counters (cached instances; rarely needed) ──
+    private readonly Dictionary<string, (PerformanceCounter read, PerformanceCounter write)> _perfCounters = new();
+
+    private (double read, double write) PerfCounterRate(string driveColon, DateTime now)
+    {
+        try
+        {
+            if (!_perfCounters.TryGetValue(driveColon, out var pcs))
+            {
+                string inst = driveColon.Replace(":", "").ToUpperInvariant() + ":";
+                var cat = new PerformanceCounterCategory("LogicalDisk");
+                string[] names = cat.GetInstanceNames();
+                string? match = names.FirstOrDefault(n => n.Equals(inst, StringComparison.OrdinalIgnoreCase))
+                             ?? names.FirstOrDefault(n => n.TrimEnd('\\').Equals(driveColon, StringComparison.OrdinalIgnoreCase));
+                if (match == null) return (0, 0);
+
+                pcs = (
+                    new PerformanceCounter("LogicalDisk", "Disk Read Bytes/sec", match, readOnly: false),
+                    new PerformanceCounter("LogicalDisk", "Disk Write Bytes/sec", match, readOnly: false));
+                _perfCounters[driveColon] = pcs;
+                pcs.read.NextValue();          // first read primes the counter
+                pcs.write.NextValue();
+                return (0, 0);
+            }
+
+            double r = Math.Max(0, pcs.read.NextValue());
+            double w = Math.Max(0, pcs.write.NextValue());
+            return (r, w);
+        }
+        catch { return (0, 0); }
     }
 
     // ── volume → physical disk mapping via storage enums ──────────────────────
@@ -194,3 +293,4 @@ public sealed class Sampler
         return -1;
     }
 }
+

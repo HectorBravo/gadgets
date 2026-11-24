@@ -1,4 +1,4 @@
-using HectorBravo.Gadgets.Core;
+﻿using HectorBravo.Gadgets.Core;
 
 namespace HectorBravo.Gadgets.DigitalClock;
 
@@ -16,4 +16,7 @@ public class ClockSettings : BaseSettings
     public bool ShowWeek { get; set; } = true;
     public bool ShowQuarter { get; set; } = true;
     public bool ShowUptime { get; set; } = true;
+    /// <summary>NTP server used by the "Sync time" action.</summary>
+    public string NtpServer { get; set; } = "pool.ntp.org";
 }
+

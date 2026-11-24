@@ -1,97 +1,100 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using HectorBravo.Gadgets.Core;
 
 namespace HectorBravo.Gadgets.DrivesMeter;
 
-/// <summary>Options window for the Drives gadget: drive slots + graph toggle.</summary>
-public class OptionsWindow : Window
+/// <summary>Options window for the Drives gadget (light theme, no scrollbars, saves immediately).</summary>
+public class OptionsWindow : OptionsWindowBase
 {
+    /// <summary>Separators accepted after a drive letter ("C", "C:", "C;", "C:\").</summary>
+    private static readonly char[] SplitSep = { ':', ';', (char)92 };
+
     private readonly ConfigStore<DrivesSettings> _cfg;
 
-    public OptionsWindow(ConfigStore<DrivesSettings> cfg)
+    public OptionsWindow(ConfigStore<DrivesSettings> cfg) : base("Drives Meter — Options")
     {
         _cfg = cfg;
-        Title = "Drives Meter — Options";
-        Width = 360; Height = 300;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new System.Windows.Media.SolidColorBrush(Theme.Hex("#161a23"));
 
-        var tabs = new TabControl();
+        // ── Drives tab: Drive 1..N text boxes (#D1) ──
+        var dp = new StackPanel { Margin = new Thickness(12) };
+        dp.Children.Add(Hint("Type a drive letter (C, D, V… — no colon or semicolon needed). \"off\" ends the list."));
 
-        // ── Drives tab: five editable slots (letter or "off") ──
-        var drivesTab = new TabItem { Header = "Drives" };
-        var panel = new StackPanel { Margin = new Thickness(12) };
-        panel.Children.Add(new TextBlock
+        int slotCount = Math.Max(5, _cfg.Data.Slots.Count);
+        for (int i = 0; i < slotCount; i++)
         {
-            Text = "Drive 1..5 — type a letter (e.g. C:) or \"off\" to stop the list.",
-            Foreground = Theme.Muted,
-            FontSize = 11,
-            Margin = new Thickness(0, 0, 0, 8),
-        });
-
-        for (int i = 0; i < _cfg.Data.Slots.Count; i++)
-        {
+            string cur = i < _cfg.Data.Slots.Count ? _cfg.Data.Slots[i] : "off";
             int idx = i;
-            var row = new Grid { Margin = new Thickness(0, 2, 0, 2) };
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(70) });
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-
-            var lbl = new TextBlock { Text = $"Drive {i + 1}:", Foreground = Theme.Fg, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(lbl, 0); row.Children.Add(lbl);
-
-            var box = new TextBox
+            dp.Children.Add(Row($"Drive {i + 1}:", Field(cur, s =>
             {
-                Text = _cfg.Data.Slots[i],
-                Width = 80,
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            box.LostFocus += (_, _) => CommitSlot(idx, box.Text);
-            Grid.SetColumn(box, 1); row.Children.Add(box);
+                var v = (s ?? "").Trim();
+                if (v.Length == 0) v = "off";
 
-            panel.Children.Add(row);
+                // normalize: accept "c", "C", "c:", "C:\path" → canonical form; keep "off" as-is (#D1)
+                if (!string.Equals(v, "off", StringComparison.OrdinalIgnoreCase))
+                {
+                    var letters = v.Split(SplitSep, StringSplitOptions.RemoveEmptyEntries);
+                    if (letters.Length > 0)
+                    {
+                        string first = letters[0];
+                        v = char.ToUpper(first[0]) + ":";
+                    }
+                    else v = "off";
+                }
+
+                while (_cfg.Data.Slots.Count <= idx) _cfg.Data.Slots.Add("off");
+                if (!string.Equals(_cfg.Data.Slots[idx], v, StringComparison.OrdinalIgnoreCase))
+                {
+                    _cfg.Data.Slots[idx] = v;
+                    _cfg.Save();                   // saved immediately (#8)
+                    InvalidateBlocks();
+                }
+            })));
         }
+        AddTab("Drives", dp);
 
-        drivesTab.Content = panel;
-        tabs.Items.Add(drivesTab);
-
-        // ── General tab: graph toggle ──
-        var general = new TabItem { Header = "General" };
+        // ── Graphs tab ──
         var gp = new StackPanel { Margin = new Thickness(12) };
-        var showGraph = new CheckBox
+        gp.Children.Add(Check("Show aggregate graph (all drives)", cfg.Data.ShowGraph, v => { cfg.Data.ShowGraph = v; cfg.Save(); }));
+        gp.Children.Add(Check("Show per-drive graphs", cfg.Data.ShowPerDriveGraph, v => { cfg.Data.ShowPerDriveGraph = v; cfg.Save(); InvalidateBlocks(); }));
+        gp.Children.Add(new LabeledSlider("Graph height (px):", 30, 240, 5, cfg.Data.GraphHeight, v =>
         {
-            Content = "Show aggregated activity graph",
-            IsChecked = cfg.Data.ShowGraph,
-            Foreground = Theme.Fg,
-            Margin = new Thickness(0, 4, 0, 4),
-        };
-        showGraph.Checked += (_, _) => { cfg.Data.ShowGraph = true; cfg.Save(); };
-        showGraph.Unchecked += (_, _) => { cfg.Data.ShowGraph = false; cfg.Save(); };
-        gp.Children.Add(showGraph);
-        general.Content = gp;
-        tabs.Items.Add(general);
+            cfg.Data.GraphHeight = Math.Round(v);
+            cfg.Save();
+        }, " px"));
+        AddTab("Graphs", gp);
 
-        Content = tabs;
+        // ── Units tab (#D5) ──
+        var up = new StackPanel { Margin = new Thickness(12) };
+        up.Children.Add(Hint("Unit for reads and writes (both use the same setting). Auto always shows 4 digits with one dot, e.g. 4.345 GB/s."));
+        foreach (var (u, label) in new[]
+        {
+            (RateUnit.Auto, "Auto"),
+            (RateUnit.GBps, "GB/s"),
+            (RateUnit.MBps, "MB/s"),
+            (RateUnit.KBps, "KB/s"),
+        })
+        {
+            RateUnit captured = u;
+            var rb = new RadioButton
+            {
+                Content = label,
+                Foreground = MenuStyle.Fg,
+                IsChecked = cfg.Data.ReadWriteUnit == u,
+                Margin = new Thickness(0, 3, 0, 3),
+            };
+            rb.Checked += (_, _) => { _cfg.Data.ReadWriteUnit = captured; _cfg.Save(); };
+            up.Children.Add(rb);
+        }
+        AddTab("Units", up);
+
+        FinalizeSize();
     }
 
-    /// <summary>Normalize a slot value to an uppercase letter + ':' or "off", then persist.</summary>
-    private void CommitSlot(int idx, string raw)
-    {
-        var s = (raw ?? "").Trim();
-        string norm;
-        if (s.Length == 0) norm = "";
-        else if (string.Equals(s, "off", StringComparison.OrdinalIgnoreCase)) norm = "off";
-        else
-        {
-            char c = char.ToUpperInvariant(s[0]);
-            norm = c >= 'A' && c <= 'Z' ? c + ":" : "";
-        }
-
-        while (_cfg.Data.Slots.Count <= idx) _cfg.Data.Slots.Add("");
-        if (!string.Equals(_cfg.Data.Slots[idx], norm, StringComparison.Ordinal))
-        {
-            _cfg.Data.Slots[idx] = norm;
-            _cfg.Save();
-        }
-    }
+    /// <summary>Force the gadget to rebuild its drive blocks on the next tick.</summary>
+    private static void InvalidateBlocks() => (Application.Current?.MainWindow as MainWindow)?.InvalidateBlocks();
 }
+
+
+
+

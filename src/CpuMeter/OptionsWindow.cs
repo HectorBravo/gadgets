@@ -1,48 +1,51 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using HectorBravo.Gadgets.Core;
 
 namespace HectorBravo.Gadgets.CpuMeter;
 
-/// <summary>Options window for the CPU gadget (separate window, opened from the menu).</summary>
-public class OptionsWindow : Window
+/// <summary>Options window for the CPU gadget (light theme, no scrollbars, saves immediately).</summary>
+public class OptionsWindow : OptionsWindowBase
 {
     private readonly ConfigStore<CpuSettings> _cfg;
 
-    public OptionsWindow(ConfigStore<CpuSettings> cfg)
+    public OptionsWindow(ConfigStore<CpuSettings> cfg) : base("CPU Usage — Options")
     {
         _cfg = cfg;
-        Title = "CPU Usage — Options";
-        Width = 340; Height = 260;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new System.Windows.Media.SolidColorBrush(Theme.Hex("#161a23"));
 
-        var tabs = new TabControl();
-        var general = new TabItem { Header = "General" };
-        var panel = new StackPanel { Margin = new Thickness(12) };
+        var general = new StackPanel { Margin = new Thickness(12) };
 
-        panel.Children.Add(new CheckBox
+        general.Children.Add(Check("Show usage graph", cfg.Data.ShowGraph, v =>
         {
-            Content = "Show usage graph",
-            IsChecked = cfg.Data.ShowGraph,
-            Foreground = Theme.Fg,
-            Margin = new Thickness(0, 4, 0, 4),
-        });
-        ((CheckBox)panel.Children[^1]).Checked += (_, _) => { cfg.Data.ShowGraph = true; cfg.Save(); };
-        ((CheckBox)panel.Children[^1]).Unchecked += (_, _) => { cfg.Data.ShowGraph = false; cfg.Save(); };
+            cfg.Data.ShowGraph = v;
+            cfg.Save();
+            // toggle the graph live on the gadget via a light refresh signal
+            (Application.Current?.MainWindow as MainWindow)?.ApplyGraphVisibility();
+        }));
 
-        panel.Children.Add(new CheckBox
+        general.Children.Add(Check("Show swap row", cfg.Data.ShowSwap, v =>
         {
-            Content = "Show swap row",
-            IsChecked = cfg.Data.ShowSwap,
-            Foreground = Theme.Fg,
-            Margin = new Thickness(0, 4, 0, 4),
-        });
-        ((CheckBox)panel.Children[^1]).Checked += (_, _) => { cfg.Data.ShowSwap = true; cfg.Save(); };
-        ((CheckBox)panel.Children[^1]).Unchecked += (_, _) => { cfg.Data.ShowSwap = false; cfg.Save(); };
+            cfg.Data.ShowSwap = v;
+            cfg.Save();
+            (Application.Current?.MainWindow as MainWindow)?.InvalidateMemRows();
+        }));
 
-        general.Content = panel;
-        tabs.Items.Add(general);
-        Content = tabs;
+        // graph height slider (#10) + history length (#7 treatment from LabeledSlider)
+        general.Children.Add(new LabeledSlider("Graph height (px):", 30, 240, 5, cfg.Data.GraphHeight, v =>
+        {
+            cfg.Data.GraphHeight = Math.Round(v);
+            cfg.Save();
+            (Application.Current?.MainWindow as MainWindow)?.ApplyGraphHeight(cfg.Data.GraphHeight);
+        }, " px"));
+
+        general.Children.Add(new LabeledSlider("History (s):", 30, 600, 10, cfg.Data.HistorySeconds, v =>
+        {
+            cfg.Data.HistorySeconds = Math.Round(v);
+            cfg.Save();
+        }, " s"));
+
+        AddTab("General", general);
+        FinalizeSize();
     }
 }
+

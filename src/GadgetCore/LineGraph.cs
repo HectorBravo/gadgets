@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Media;
 
 namespace HectorBravo.Gadgets.Core;
@@ -7,9 +7,11 @@ namespace HectorBravo.Gadgets.Core;
 public record Series(string Name, IReadOnlyList<double> Samples, Color Color);
 
 /// <summary>
-/// Lightweight multi-series line graph drawn in OnRender (no GPU acceleration —
-/// pure WPF vector rendering, works everywhere). Auto-scales vertically to the
-/// data and paints a min/max legend on the right, like the original gadgets.
+/// Lightweight multi-series line graph drawn in OnRender. Auto-scales vertically to
+/// the data and paints a min/max legend on the right, like the original gadgets.
+/// The horizontal axis is TIME-proportional: with Capacity samples filling the whole
+/// width, N fresh samples occupy only the leftmost N/Capacity of it — so a graph that
+/// just started does not stretch its first points across the full width (#6).
 /// </summary>
 public class LineGraph : FrameworkElement
 {
@@ -20,9 +22,12 @@ public class LineGraph : FrameworkElement
     /// <summary>Fixed axis (overrides auto-scale) when set.</summary>
     public double? FixedMax { get; set; }
 
+    /// <summary>Number of samples that fills the full width (history length). 0 = auto (data length).</summary>
+    public int Capacity { get; set; }
+
     public LineGraph()
     {
-        IsHitTestVisible = false; // let drags pass through to the window
+        IsHitTestVisible = false;   // let drags pass through to the window
         SnapsToDevicePixels = true;
     }
 
@@ -42,12 +47,16 @@ public class LineGraph : FrameworkElement
 
         _hasData = false;
         double min = double.MaxValue, max = double.MinValue;
+        int n = 0;
         foreach (var s in _series)
+        {
+            if (s.Samples.Count > n) n = s.Samples.Count;
             foreach (var v in s.Samples)
             {
                 if (v < min) min = v;
                 if (v > max) max = v;
             }
+        }
         if (min == double.MaxValue) { min = 0; max = 1; }
         if (FixedMax is double fm) max = Math.Max(fm, max);
         if (max - min < 1e-9) max = min + 1;
@@ -62,10 +71,20 @@ public class LineGraph : FrameworkElement
             dc.DrawLine(gridPen, new Point(1, y), new Point(w - 1, y));
         }
 
+        // time-proportional horizontal mapping: capacity samples span the full width
+        int cap = Capacity > 0 ? Math.Max(Capacity, n) : n;
+        if (cap < 2) cap = 2;
+
         foreach (var s in _series)
         {
             var pts = s.Samples;
             if (pts.Count < 2) continue;
+
+            // the newest sample sits at x = w * count/cap (left-aligned while young,
+            // full width once history is complete)
+            double offset = w * (cap - pts.Count) / (double)(cap - 1);
+            if (offset < 0) offset = 0;
+
             var pen = new Pen(new SolidColorBrush(s.Color), 1.2);
             pen.Freeze();
             var geo = new StreamGeometry();
@@ -73,7 +92,8 @@ public class LineGraph : FrameworkElement
             {
                 for (int i = 0; i < pts.Count; i++)
                 {
-                    double x = w * i / (pts.Count - 1);
+                    double x = offset + w * i / (cap - 1);
+                    if (x > w) x = w;
                     double y = h - h * ((pts[i] - min) / (max - min));
                     var p = new Point(x, Math.Clamp(y, 0, h));
                     if (i == 0) gc.BeginFigure(p, false, false);
@@ -86,7 +106,7 @@ public class LineGraph : FrameworkElement
 
         // min/max legend on the right edge (like the originals' axis labels)
         var fmt = LegendFormat;
-        if (fmt != null)
+        if (fmt != null && _hasData)
         {
             DrawLabel(dc, fmt(max), w - 4, 1, HorizontalAlignment.Right);
             DrawLabel(dc, fmt(min), w - 4, h - 13, HorizontalAlignment.Right);
@@ -116,3 +136,4 @@ public class LineGraph : FrameworkElement
         return _minY + frac * (_maxY - _minY);
     }
 }
+

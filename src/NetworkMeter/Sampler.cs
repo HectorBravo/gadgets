@@ -1,67 +1,44 @@
-using System.Diagnostics;
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
+﻿using System.Net.NetworkInformation;
+using HectorBravo.Gadgets.Core;
 
 namespace HectorBravo.Gadgets.NetworkMeter;
 
-public record IfaceSample(
-    string Name,          // adapter name (stable key)
-    string Description,   // friendly description
-    string Ipv4,          // first internal IPv4 or ""
-    ulong LinkSpeedBps,   // negotiated speed, 0 = unknown
-    double TxRate,        // bytes/sec
-    double RxRate,        // bytes/sec
-    bool IsUp);
+public record IfSample(
+    string Id, string Name, long SpeedBps,
+    double RxRate, double TxRate);
 
-public record AdapterInfo(string Name, string Description, bool IsLoopback, bool IsUp);
-
-/// <summary>Per-interface rates via NetworkInterface IPv4 statistics deltas.</summary>
+/// <summary>
+/// Network sampler: per-interface rx/tx bytes/s (from the OS interface statistics — no
+/// packet capture), plus a self-heal counter so a stalled enumeration (#19) recovers.
+/// </summary>
 public sealed class Sampler
 {
-    private readonly Dictionary<string, (ulong rx, ulong tx, DateTime at)> _prev = new();
-    private List<IfaceSample> _latest = new();
+    private readonly Dictionary<string, (long rx, long tx, DateTime at)> _prev = new();
 
-    public IReadOnlyList<IfaceSample> Latest => _latest;
+    /// <summary>Monotonically increasing; increments on every successful sample (UI watchdog #19).</summary>
+    public long Tick { get; private set; }
 
-    /// <summary>All adapters (for the Options checkbox list).</summary>
-    public List<AdapterInfo> Adapters()
+    /// <summary>Rx/tx history rings (aggregate over selected interfaces), newest-last.</summary>
+    public Ring RxHist { get; } = new(600);
+    public Ring TxHist { get; } = new(600);
+
+    public List<IfSample> Sample(IReadOnlyList<string> selectedIds)
     {
-        var list = new List<AdapterInfo>();
-        try
-        {
-            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
-                list.Add(new AdapterInfo(ni.Name, ni.Description,
-                    ni.NetworkInterfaceType is NetworkInterfaceType.Loopback,
-                    ni.OperationalStatus == OperationalStatus.Up));
-        }
-        catch { /* transient */ }
-        return list;
-    }
-
-    /// <summary>Sample the interfaces whose name is in `wanted`.</summary>
-    public List<IfaceSample> Sample(IReadOnlyList<string> wanted)
-    {
+        var list = new List<IfSample>();
         var now = DateTime.Now;
-        var outList = new List<IfaceSample>();
+        double sumRx = 0, sumTx = 0;
 
         try
         {
             foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
             {
-                if (!wanted.Contains(ni.Name)) continue;
-                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                if (!selectedIds.Contains(ni.Id)) continue;
 
-                ulong rx = 0, tx = 0;
-                try
-                {
-                    var st = ni.GetIPv4Statistics();
-                    rx = (ulong)Math.Max(0, st.BytesReceived);
-                    tx = (ulong)Math.Max(0, st.BytesSent);
-                }
-                catch { /* adapter gone */ }
+                var st = ni.GetIPv4Statistics();
+                long rx = st.BytesReceived, tx = st.BytesSent;
 
                 double rxRate = 0, txRate = 0;
-                if (_prev.TryGetValue(ni.Name, out var p) && now > p.at)
+                if (_prev.TryGetValue(ni.Id, out var p) && now > p.at)
                 {
                     double secs = (now - p.at).TotalSeconds;
                     if (secs > 0.1)
@@ -70,32 +47,29 @@ public sealed class Sampler
                         txRate = Math.Max(0, tx - p.tx) / secs;
                     }
                 }
-                _prev[ni.Name] = (rx, tx, now);
+                _prev[ni.Id] = (rx, tx, now);
 
-                outList.Add(new IfaceSample(
-                    ni.Name, ni.Description, FirstIpv4(ni), (ulong)Math.Max(0, ni.Speed),
-                    txRate, rxRate, ni.OperationalStatus == OperationalStatus.Up));
+                sumRx += rxRate;
+                sumTx += txRate;
+
+                list.Add(new IfSample(ni.Id, ni.Name, ni.Speed, rxRate, txRate));
             }
         }
-        catch { /* enumeration race */ }
-
-        // drop counters of adapters that disappeared
-        _prev.Keys.Where(k => outList.All(s => s.Name != k)).ToList()
-                  .ForEach(k => _prev.Remove(k));
-
-        _latest = outList;
-        return outList;
-    }
-
-    private static string FirstIpv4(NetworkInterface ni)
-    {
-        try
+        catch
         {
-            foreach (var ua in ni.GetIPProperties().UnicastAddresses)
-                if (ua.Address.AddressFamily == AddressFamily.InterNetwork)
-                    return ua.Address.ToString();
+            // enumeration hiccup — drop the stale prev entries so the next tick re-baselines
+            _prev.Clear();
         }
-        catch { /* ignore */ }
-        return "";
+
+        RxHist.Add(sumRx);
+        TxHist.Add(sumTx);
+        Tick++;
+        return list;
     }
 }
+
+
+
+
+
+
