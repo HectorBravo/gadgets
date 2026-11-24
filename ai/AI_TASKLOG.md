@@ -4,22 +4,22 @@
 
 | Created | Task | Status | Type | Subtasks | Time Spent | Blockers |
 |---------|------|--------|------|----------|------------|----------|
-| 24-11-2026 04:21:45 | [T3: Review round 2 — 21 global + 17 gadget-specific fixes](#task-t3-review-round-2--21-global--17-gadget-specific-fixes) | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">in_progress</span> | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 12/14 | 5h 25m | none |
+| 24-11-2026 04:21:45 | [T3: Review round 2 — 21 global + 17 gadget-specific fixes](#task-t3-review-round-2--21-global--17-gadget-specific-fixes) | <span style="background-color:#22863a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">done</span> | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 14/14 | 6h 5m | none |
 | 23-11-2026 01:21:00 | [T1: Rust desktop gadgets (cpu/drives/network/clock)](#task-t1-rust-desktop-gadgets-cpudrivesnetworkclock) | <span style="background-color:#da3633;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">blocked</span> | <span style="background-color:#22863a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">feat</span> | 12/14 | 7h 30m | superseded — Rust removed, see [T2](#task-t2-migrate-all-4-gadgets-rust--csharpwpf) (done) |
 
-> ✅ **1 completed task(s)** — [View completed tasks](#completed-tasks)
+> ✅ **2 completed task(s)** — [View completed tasks](#completed-tasks)
 
 ---
 
 ## Task T3: Review round 2 — 21 global + 17 gadget-specific fixes
 
-- **Status**: <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">in_progress</span>
+- **Status**: <span style="background-color:#22863a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">done</span>
 - **Type**: <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span>
 - **Created**: 24-11-2026 04:21:45
-- **Last Updated**: 24-11-2026 09:50:00
-- **Time Spent**: 5h 25m
+- **Last Updated**: 24-11-2026 10:07:00
+- **Time Spent**: 6h 5m
 - **Branch**: [`feat/ai-gadget-review-round-2`](https://github.com/HectorBravo/gadgets/tree/feat/ai-gadget-review-round-2)
-- **Commit(s)**: pending
+- **Commit(s)**: [d3f8171](https://github.com/HectorBravo/gadgets/commit/d3f8171), [b210543](https://github.com/HectorBravo/gadgets/commit/b210543), [8b49fbe](https://github.com/HectorBravo/gadgets/commit/8b49fbe)
 - **Blockers**: none
 - **Findings & Notes**:
   - User reviewed the 4 C#/WPF gadgets and reported 21 global issues + gadget-specific issues (Drives 9, Clock 2, Network 5, CPU 3). All implemented in one pass; user asleep → best-judgement choices recorded below for confirmation tomorrow.
@@ -55,8 +55,8 @@
 - [x] S10 — NetworkMeter: link speed own line in light blue; rate unit setting; upload green / download yellow; All/None + ordering; Ext IP before first interface (#N1–#N5)
 - [x] S11 — CpuMeter: cores numbered from 1, "Core n" text replaced by per-core effective MHz; core/thread/E-core label colors (#P1–#P3)
 - [x] S12 — Efficiency pass: reuse visual tree instead of rebuilding each tick, ring buffers, cheap sampling (#18, #19, #21)
-- [ ] S13 — Build all 4 Release clean + smoke run
-- [ ] S14 — Docs/CHANGELOG, commit+push, publish releases (self-contained), merge to main, delete AI branches
+- [x] S13 — Build all 4 Release clean + smoke run
+- [x] S14 — Docs/CHANGELOG, commit+push, publish releases (self-contained), merge to main, delete AI branches
 
 ### Full Context Notes for AI Agents
 
@@ -248,4 +248,5 @@ Binaries: `CpuMeter.exe`, `DrivesMeter.exe`, `NetworkMeter.exe`, `DigitalClock.e
 
 | Created | Task | Type | Subtasks | Time Spent |
 |---------|------|------|----------|------------|
+| 24-11-2026 04:21:45 | [T3: Review round 2 — 21 global + 17 gadget-specific fixes](#task-t3-review-round-2--21-global--17-gadget-specific-fixes) | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 14/14 | 6h 5m |
 | 23-11-2026 12:00:57 | [T2: Migrate all 4 gadgets Rust → C#/WPF](#task-t2-migrate-all-4-gadgets-rust--csharpwpf) | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 10/10 | 18m |
