@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -7,25 +7,31 @@ using HectorBravo.Gadgets.Core;
 
 namespace HectorBravo.Gadgets.NetworkMeter;
 
-/// <summary>Network Meter gadget: per-adapter TX/RX rates, internal + external IP, two-line graph.</summary>
-public class MainWindow : GadgetWindow
+/// <summary>Network Meter gadget: ext IP line (top), per-interface blocks, traffic graph.</summary>
+public class MainWindow : GadgetWindow<NetSettings>
 {
-    private readonly ConfigStore<NetworkSettings> _cfg;
     private readonly Sampler _sampler = new();
     private readonly DispatcherTimer _timer;
-    private readonly ExternalIp _ext = new();
-    private DateTime _lastExtRefresh = DateTime.MinValue;
 
-    // per-adapter history (name -> tx/rx samples), newest-last
-    private readonly Dictionary<string, (List<double> tx, List<double> rx)> _hists = new();
+    private readonly TextBlock _title = new();
+    private readonly TextBlock _extIpLine = new();
+    private readonly StackPanel _ifRows = new();
+    private readonly LineGraph _graph = new();
 
-    private readonly StackPanel _ifaceRows = new();
-    private readonly TextBlock _extIpText = new();
+    // cached per-interface visuals (#21)
+    private readonly Dictionary<string, IfBlock> _blocks = new();
+    private string _blockKey = "";
 
-    public MainWindow() : base("NetworkMeter", new ConfigStore<BaseSettings>("NetworkMeter"))
+    // watchdog: if the sampler stops ticking (e.g. enumeration stall), force a refresh (#19)
+    private long _lastTick;
+    private int _stalledTicks;
+
+    // external IP fetcher (background, cached — never blocks the UI thread)
+    private readonly ExternalIp _extIp = new();
+
+    public MainWindow() : base("NetworkMeter", new ConfigStore<NetSettings>("NetworkMeter"))
     {
-        _cfg = new ConfigStore<NetworkSettings>("NetworkMeter");
-        Title = "Network Meter";
+        Title = "Network";
 
         var root = new StackPanel { Margin = new Thickness(8, 6, 8, 4) };
         ContentHost.Children.Add(root);
@@ -38,170 +44,169 @@ public class MainWindow : GadgetWindow
         var icon = new TextBlock { Text = "🌐", FontSize = 16, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(icon, 0); header.Children.Add(icon);
 
-        var title = new TextBlock
-        {
-            Text = "Network Meter",
-            Foreground = Theme.TitleFg,
-            FontSize = 15,
-            FontWeight = FontWeights.Bold,
-            Margin = new Thickness(6, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        Grid.SetColumn(title, 1); header.Children.Add(title);
+        _title.Text = "Network Meter";
+        _title.Foreground = Theme.TitleFg;       // white + bold (#13)
+        _title.FontSize = 15;
+        _title.FontWeight = FontWeights.Bold;
+        _title.Margin = new Thickness(6, 0, 0, 0);
+        _title.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(_title, 1); header.Children.Add(_title);
 
         root.Children.Add(header);
 
+        // ── external IP line — printed just before the first interface (#N5) ──
+        _extIpLine.FontSize = 11;
+        _extIpLine.Margin = new Thickness(0, 2, 0, 1);
+        root.Children.Add(_extIpLine);
+
         // ── per-interface blocks ──
-        _ifaceRows.Margin = new Thickness(0, 4, 0, 2);
-        root.Children.Add(_ifaceRows);
+        _ifRows.Margin = new Thickness(0, 2, 0, 2);
+        root.Children.Add(_ifRows);
 
-        // ── external IP row with refresh button ──
-        var extRow = new Grid { Margin = new Thickness(0, 4, 0, 0) };
-        extRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        extRow.ColumnDefinitions.Add(new ColumnDefinition());
-        extRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        // ── traffic graph (upload green / download yellow — #N3) ──
+        _graph.Height = Math.Clamp(Cfg.Data.GraphHeight, 30, 240);
+        _graph.LegendFormat = v => Fmt.Rate(v);
+        root.Children.Add(_graph);
 
-        var extLbl = new TextBlock { Text = "Ext. IP: ", Foreground = Theme.Muted, FontSize = 11 };
-        Grid.SetColumn(extLbl, 0); extRow.Children.Add(extLbl);
-
-        _extIpText.Foreground = Theme.Green;
-        _extIpText.FontSize = 11;
-        Grid.SetColumn(_extIpText, 1); extRow.Children.Add(_extIpText);
-
-        var refreshBtn = new Button { Content = "⟳", Padding = new Thickness(4, 0, 4, 0), FontSize = 12 };
-        refreshBtn.Click += (_, _) => { _ext.Refresh(); _lastExtRefresh = DateTime.Now; UpdateExtIp(); };
-        Grid.SetColumn(refreshBtn, 2); extRow.Children.Add(refreshBtn);
-
-        root.Children.Add(extRow);
-
-        OpenOptions = () => { var w = new OptionsWindow(_cfg) { Owner = this }; w.Show(); };
+        OpenOptions = () => { var w = new OptionsWindow(Cfg) { Owner = this }; w.Show(); };
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) => Refresh();
-        Loaded += (_, _) => { RebuildHistories(); Refresh(); };
-        _ext.Refresh();
-        _lastExtRefresh = DateTime.Now;
+        Loaded += (_, _) => Refresh();
         _timer.Start();
 
-        var updater = new UpdateNotifier(this, new UpdateService("network-meter", "NetworkMeter.exe"));
+        var updater = new UpdateNotifier<NetSettings>(this, new UpdateService("network-meter", "NetworkMeter.exe"));
     }
 
-    /// <summary>Names of the interfaces to display (empty config = auto: all up, non-loopback).</summary>
-    private List<string> Wanted()
+    /// <summary>Interfaces to show: configured selection re-mapped by name, or all "up" adapters when empty.</summary>
+    private List<string> ResolveSelected()
     {
-        if (_cfg.Data.InterfaceNames.Count > 0)
-            return _cfg.Data.InterfaceNames.ToList();
-        return _sampler.Adapters()
-                       .Where(a => a.IsUp && !a.IsLoopback)
-                       .Select(a => a.Name)
-                       .ToList();
-    }
+        var all = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces();
 
-    private int Cap => Math.Clamp(Math.Max(10, _cfg.Data.HistorySeconds), 30, 600);
+        if (Cfg.Data.Interfaces.Count == 0)
+            return all.Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up &&
+                                   n.NetworkInterfaceType != System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
+                      .Select(n => n.Id).ToList();
 
-    /// <summary>Ensure a history buffer exists for each wanted interface.</summary>
-    private void RebuildHistories()
-    {
-        var wanted = Wanted();
-        foreach (var k in _hists.Keys.Where(k => !wanted.Contains(k)).ToList())
-            _hists.Remove(k);
-        foreach (var w in wanted)
-            if (!_hists.ContainsKey(w))
-                _hists[w] = (new List<double>(), new List<double>());
+        // re-map saved indices by name (indices change across boots/adapters)
+        var resolved = new List<string>();
+        for (int i = 0; i < Cfg.Data.Interfaces.Count && i < Cfg.Data.InterfaceNames.Count; i++)
+        {
+            string idx = Cfg.Data.Interfaces[i];
+            string name = Cfg.Data.InterfaceNames[i];
+            var ni = all.FirstOrDefault(n => n.Id == idx)
+                  ?? all.FirstOrDefault(n => string.Equals(n.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (ni != null && !resolved.Contains(ni.Id)) resolved.Add(ni.Id);
+        }
+        return resolved;
     }
 
     private void Refresh()
     {
-        RebuildHistories();
-        var snaps = _sampler.Sample(Wanted());
+        var selected = ResolveSelected();
+        var samples = _sampler.Sample(selected);
 
-        // push samples into history
-        foreach (var s in snaps)
+        // watchdog (#19): if the sampler tick did not advance, re-baseline and keep going
+        if (_sampler.Tick == _lastTick)
         {
-            if (_hists.TryGetValue(s.Name, out var h))
+            if (++_stalledTicks >= 3) { _stalledTicks = 0; /* next Sample() call will retry enumeration */ }
+        }
+        else _stalledTicks = 0;
+        _lastTick = _sampler.Tick;
+
+        // external IP line before the interfaces (#N5): label white, value light blue (#20)
+        if (Cfg.Data.ShowExtIP)
+        {
+            _extIp.Refresh();                       // fire-and-forget; Display shows "…" until ready
+            _extIpLine.Visibility = Visibility.Visible;
+            _extIpLine.Inlines.Clear();
+            _extIpLine.Inlines.Add(new Run("Ext IP: ") { Foreground = Theme.White });
+            _extIpLine.Inlines.Add(new Run(_extIp.Display) { Foreground = Theme.Blue });
+        }
+        else _extIpLine.Visibility = Visibility.Collapsed;
+
+        // rebuild interface blocks only when the set changed (#21)
+        string key = string.Join(",", samples.Select(s => s.Id));
+        if (key != _blockKey)
+        {
+            _blockKey = key;
+            _ifRows.Children.Clear();
+            _blocks.Clear();
+            foreach (var s in samples)
             {
-                h.tx.Add(s.TxRate);
-                h.rx.Add(s.RxRate);
-                int cap = Cap;
-                while (h.tx.Count > cap) h.tx.RemoveAt(0);
-                while (h.rx.Count > cap) h.rx.RemoveAt(0);
+                var b = new IfBlock();
+                _blocks[s.Id] = b;
+                _ifRows.Children.Add(b.Root);
             }
         }
 
-        // auto external-IP refresh
-        var every = TimeSpan.FromMinutes(Math.Max(1, _cfg.Data.ExternalRefreshMinutes));
-        if (!_ext.Fetching && DateTime.Now - _lastExtRefresh >= every)
+        foreach (var s in samples)
+            if (_blocks.TryGetValue(s.Id, out var b))
+                b.Update(s, Cfg.Data.SpeedUnit);
+
+        // graph: upload green / download yellow (#N3), trimmed to the configured history (#18)
+        int cap = Math.Clamp((int)Cfg.Data.HistorySeconds, 30, _sampler.RxHist.Capacity);
+        _graph.Height = Math.Clamp(Cfg.Data.GraphHeight, 30, 240);
+        _graph.SetSeries(new List<Series>
         {
-            _lastExtRefresh = DateTime.Now;
-            _ext.Refresh();
-        }
-        UpdateExtIp();
+            new("up", Trim(_sampler.TxHist.Snapshot(), cap), Theme.Hex("#bfffb2")),
+            new("down", Trim(_sampler.RxHist.Snapshot(), cap), Theme.Hex("#ffe14d")),
+        });
+    }
 
-        // rebuild the visible blocks
-        _ifaceRows.Children.Clear();
-        if (snaps.Count == 0)
+    private static double[] Trim(double[] a, int cap)
+    {
+        if (a.Length <= cap) return a;
+        var r = new double[cap];
+        Array.Copy(a, a.Length - cap, r, 0, cap);
+        return r;
+    }
+
+    /// <summary>One interface: name line, link speed on its own line (#N1), up/down rates.</summary>
+    private sealed class IfBlock
+    {
+        public StackPanel Root { get; } = new() { Margin = new Thickness(0, 2, 0, 3) };
+
+        private readonly TextBlock _nameLine = new();
+        private readonly TextBlock _speedLine = new();
+        private readonly TextBlock _ratesLine = new();
+
+        public void Update(IfSample s, RateUnit unit)
         {
-            _ifaceRows.Children.Add(new TextBlock
-            {
-                Text = "No interfaces selected (right-click → Options…)",
-                Foreground = Theme.Muted,
-                FontSize = 11,
-                Margin = new Thickness(0, 2, 0, 2),
-            });
+            // interface name (label white — #20)
+            _nameLine.Inlines.Clear();
+            _nameLine.Inlines.Add(new Run(s.Name) { Foreground = Theme.White, FontWeight = FontWeights.Bold });
+
+            // link speed on the NEXT line, light blue (#N1/#N5 clarification)
+            _speedLine.Inlines.Clear();
+            string speed = s.SpeedBps <= 0 ? "—" : Fmt.LinkSpeed(s.SpeedBps);
+            _speedLine.Inlines.Add(new Run("Link: ") { Foreground = Theme.White });
+            _speedLine.Inlines.Add(new Run(speed) { Foreground = Theme.Blue });
+
+            // up (green) / down (yellow) — both text and icon (#N3), unit from settings (#N2)
+            _ratesLine.Inlines.Clear();
+            _ratesLine.Inlines.Add(new Run("\u25B2 ") { Foreground = Theme.Green });
+            _ratesLine.Inlines.Add(new Run(Fmt.RateU(s.TxRate, unit)) { Foreground = Theme.Green });
+            _ratesLine.Inlines.Add(new Run("   \u25BC ") { Foreground = Theme.Yellow });
+            _ratesLine.Inlines.Add(new Run(Fmt.RateU(s.RxRate, unit)) { Foreground = Theme.Yellow });
         }
-        foreach (var s in snaps)
-            AddIfaceBlock(s);
+
+        public IfBlock()
+        {
+            _nameLine.FontSize = 12;
+            Root.Children.Add(_nameLine);
+
+            _speedLine.FontSize = 11;
+            _speedLine.Margin = new Thickness(0, 1, 0, 0);
+            Root.Children.Add(_speedLine);
+
+            _ratesLine.FontSize = 11;
+            _ratesLine.Margin = new Thickness(0, 1, 0, 0);
+            Root.Children.Add(_ratesLine);
+        }
     }
-
-    private void UpdateExtIp() => _extIpText.Text = _ext.Display;
-
-    private void AddIfaceBlock(IfaceSample s)
-    {
-        var block = new StackPanel { Margin = new Thickness(0, 2, 0, 4) };
-
-        // header: name (+ link speed)
-        string title = LinkLabel(s.LinkSpeedBps) is { Length: > 0 } ll
-            ? Truncate(s.Description.Length > 0 ? s.Description : s.Name, 32) + " (" + ll + ")"
-            : Truncate(s.Description.Length > 0 ? s.Description : s.Name, 40);
-        block.Children.Add(new TextBlock { Text = title, Foreground = Theme.TitleFg, FontSize = 12, FontWeight = FontWeights.Bold });
-
-        // internal IP (+ down)
-        var ipRow = new StackPanel { Orientation = Orientation.Horizontal };
-        ipRow.Children.Add(new TextBlock { Text = "Int. IP: ", Foreground = Theme.Muted, FontSize = 11 });
-        ipRow.Children.Add(new TextBlock { Text = s.Ipv4.Length > 0 ? s.Ipv4 : "n/a", Foreground = Theme.Green, FontSize = 11 });
-        if (!s.IsUp)
-            ipRow.Children.Add(new TextBlock { Text = " (down)", Foreground = Theme.Red, FontSize = 11 });
-        block.Children.Add(ipRow);
-
-        // rates: ▲ Mbit/s   ▼ MB/s
-        var rateRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 1, 0, 0) };
-        rateRow.Children.Add(new TextBlock { Text = "▲ ", Foreground = Theme.Yellow, FontSize = 11 });
-        rateRow.Children.Add(new TextBlock { Text = Fmt.BitRate(s.TxRate), Foreground = Theme.Green, FontSize = 11 });
-        rateRow.Children.Add(new TextBlock { Text = "   ▼ ", Foreground = Theme.Yellow, FontSize = 11 });
-        rateRow.Children.Add(new TextBlock { Text = Fmt.Rate(s.RxRate), Foreground = Theme.Green, FontSize = 11 });
-        block.Children.Add(rateRow);
-
-        // graph (TX yellow / RX green)
-        var graph = new LineGraph { Height = Math.Clamp(_cfg.Data.GraphHeight, 30, 200), Margin = new Thickness(0, 3, 0, 0) };
-        if (_hists.TryGetValue(s.Name, out var h))
-            graph.SetSeries(new List<Series>
-            {
-                new("tx", h.tx, Theme.Hex("#ffe14d")),
-                new("rx", h.rx, Theme.Hex("#bfffb2")),
-            });
-        block.Children.Add(graph);
-
-        _ifaceRows.Children.Add(block);
-    }
-
-    private static string LinkLabel(ulong bitsPerSec)
-    {
-        if (bitsPerSec == 0 || bitsPerSec >= ulong.MaxValue / 2) return "";
-        double g = bitsPerSec / 1e9;
-        return g >= 0.95 ? $"{g:0}Gbps link" : $"{bitsPerSec / 1e6:0}Mbps link";
-    }
-
-    private static string Truncate(string s, int max) =>
-        s.Length <= max ? s : s.Substring(0, max) + "\u2026";
 }
+
+
+
 

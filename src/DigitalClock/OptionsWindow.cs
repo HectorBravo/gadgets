@@ -1,32 +1,25 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using HectorBravo.Gadgets.Core;
 
 namespace HectorBravo.Gadgets.DigitalClock;
 
-/// <summary>Options window for the Digital Clock: Format / Lines / General tabs.</summary>
-public class OptionsWindow : Window
+/// <summary>Options window for the Digital Clock: Format / Lines / NTP tabs (light, no scrollbars).</summary>
+public class OptionsWindow : OptionsWindowBase
 {
     private readonly ConfigStore<ClockSettings> _cfg;
 
-    public OptionsWindow(ConfigStore<ClockSettings> cfg)
+    public OptionsWindow(ConfigStore<ClockSettings> cfg) : base("Digital Clock — Options")
     {
         _cfg = cfg;
-        Title = "Digital Clock — Options";
-        Width = 360; Height = 320;
-        WindowStartupLocation = WindowStartupLocation.CenterOwner;
-        Background = new System.Windows.Media.SolidColorBrush(Theme.Hex("#161a23"));
-
-        var tabs = new TabControl();
 
         // ── Format tab ──
-        var format = new TabItem { Header = "Format" };
         var fp = new StackPanel { Margin = new Thickness(12) };
-        fp.Children.Add(Check("12-hour clock (AM/PM)", cfg.Data.Use12h, v => cfg.Data.Use12h = v));
-        fp.Children.Add(Check("Show seconds", cfg.Data.ShowSeconds, v => cfg.Data.ShowSeconds = v));
-        fp.Children.Add(Check("Show date", cfg.Data.ShowDate, v => cfg.Data.ShowDate = v));
+        fp.Children.Add(Check("12-hour clock (AM/PM)", cfg.Data.Use12h, v => { cfg.Data.Use12h = v; cfg.Save(); }));
+        fp.Children.Add(Check("Show seconds", cfg.Data.ShowSeconds, v => { cfg.Data.ShowSeconds = v; cfg.Save(); }));
+        fp.Children.Add(Check("Show date", cfg.Data.ShowDate, v => { cfg.Data.ShowDate = v; cfg.Save(); }));
 
-        fp.Children.Add(new TextBlock { Text = "Weekday name:", Foreground = Theme.Fg, Margin = new Thickness(0, 8, 0, 2) });
+        fp.Children.Add(new TextBlock { Text = "Weekday name:", Foreground = MenuStyle.Fg, Margin = new Thickness(0, 8, 0, 2) });
         foreach (var (pos, label) in new[]
         {
             (WeekdayPos.None, "Hidden"),
@@ -38,49 +31,39 @@ public class OptionsWindow : Window
             var rb = new RadioButton
             {
                 Content = label,
-                Foreground = Theme.Fg,
+                Foreground = MenuStyle.Fg,
                 IsChecked = cfg.Data.Weekday == pos,
                 Margin = new Thickness(12, 2, 0, 2),
             };
             rb.Checked += (_, _) => { cfg.Data.Weekday = captured; cfg.Save(); };
             fp.Children.Add(rb);
         }
-        format.Content = fp;
-        tabs.Items.Add(format);
+        AddTab("Format", fp);
 
         // ── Lines tab ──
-        var lines = new TabItem { Header = "Lines" };
         var lp = new StackPanel { Margin = new Thickness(12) };
-        lp.Children.Add(Check("Day of year", cfg.Data.ShowDayOfYear, v => cfg.Data.ShowDayOfYear = v));
-        lp.Children.Add(Check("Week number (ISO)", cfg.Data.ShowWeek, v => cfg.Data.ShowWeek = v));
-        lp.Children.Add(Check("Quarter", cfg.Data.ShowQuarter, v => cfg.Data.ShowQuarter = v));
-        lp.Children.Add(Check("System uptime (since boot)", cfg.Data.ShowUptime, v => cfg.Data.ShowUptime = v));
-        lines.Content = lp;
-        tabs.Items.Add(lines);
+        lp.Children.Add(Check("Day of year", cfg.Data.ShowDayOfYear, v => { cfg.Data.ShowDayOfYear = v; cfg.Save(); }));
+        lp.Children.Add(Check("Week number (ISO)", cfg.Data.ShowWeek, v => { cfg.Data.ShowWeek = v; cfg.Save(); }));
+        lp.Children.Add(Check("Quarter", cfg.Data.ShowQuarter, v => { cfg.Data.ShowQuarter = v; cfg.Save(); }));
+        lp.Children.Add(Check("System uptime (since boot)", cfg.Data.ShowUptime, v => { cfg.Data.ShowUptime = v; cfg.Save(); }));
+        AddTab("Lines", lp);
 
-        // ── General tab ──
-        var general = new TabItem { Header = "General" };
-        var gp = new StackPanel { Margin = new Thickness(12) };
-        gp.Children.Add(new TextBlock { Text = "Digital Clock", Foreground = Theme.Fg, FontSize = 13, FontWeight = FontWeights.Bold });
-        gp.Children.Add(new TextBlock { Text = "Drag the gadget to move it; it snaps to screen edges and other gadgets.", Foreground = Theme.Muted, FontSize = 11, Margin = new Thickness(0, 6, 0, 0) });
-        gp.Children.Add(new TextBlock { Text = "Scale and opacity are in the right-click menu.", Foreground = Theme.Muted, FontSize = 11, Margin = new Thickness(0, 4, 0, 0) });
-        general.Content = gp;
-        tabs.Items.Add(general);
-
-        Content = tabs;
-    }
-
-    private CheckBox Check(string text, bool initial, Action<bool> onChange)
-    {
-        var cb = new CheckBox
+        // ── NTP tab (#C1) ──
+        var np = new StackPanel { Margin = new Thickness(12) };
+        np.Children.Add(Hint("Server used by the \"Sync time\" button on the gadget. Clicking Sync queries it and steps the system clock (applying requires running the gadget as administrator)."));
+        np.Children.Add(Row("NTP server:", Field(cfg.Data.NtpServer, s =>
         {
-            Content = text,
-            IsChecked = initial,
-            Foreground = Theme.Fg,
-            Margin = new Thickness(0, 4, 0, 4),
-        };
-        cb.Checked += (_, _) => { onChange(true); _cfg.Save(); };
-        cb.Unchecked += (_, _) => { onChange(false); _cfg.Save(); };
-        return cb;
+            var v = (s ?? "").Trim();
+            if (v.Length == 0) v = "pool.ntp.org";
+            if (!string.Equals(_cfg.Data.NtpServer, v, System.StringComparison.Ordinal))
+            {
+                _cfg.Data.NtpServer = v;
+                _cfg.Save();                       // saved immediately
+            }
+        })));
+        AddTab("NTP", np);
+
+        FinalizeSize();
     }
 }
+

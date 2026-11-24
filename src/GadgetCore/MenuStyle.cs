@@ -18,6 +18,8 @@ public static class MenuStyle
     public static readonly Brush Disabled  = Frozen("#7a7a7a");
     public static readonly Brush Outline    = Frozen("#b9c3cf");
     public static readonly Brush InputBg   = Frozen("#ffffff");
+    public static readonly Brush BgAlt     = Frozen("#eef2f6");   // button face
+    public static readonly Brush BorderBrush = Frozen("#b9c3cf");  // control borders
 
     private static Color Hex(string s) => (Color)ColorConverter.ConvertFromString(s);
     private static Brush Frozen(string s) { var b = new SolidColorBrush(Hex(s)); b.Freeze(); return b; }
@@ -229,4 +231,6 @@ public static class MenuStyle
         return t;
     }
 }
+
+
 

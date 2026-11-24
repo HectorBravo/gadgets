@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -7,27 +7,28 @@ using HectorBravo.Gadgets.Core;
 
 namespace HectorBravo.Gadgets.CpuMeter;
 
-/// <summary>CPU Usage gadget (matches the original layout).</summary>
-public class MainWindow : GadgetWindow
+/// <summary>CPU Usage gadget: total %, clock, RAM/swap, per-core rows (1-based), history graph.</summary>
+public class MainWindow : GadgetWindow<CpuSettings>
 {
-    private readonly ConfigStore<CpuSettings> _cfg;
     private readonly Sampler _sampler = new();
     private readonly DispatcherTimer _timer;
 
-    // history for the mini graph at the bottom
-    private readonly List<double> _totalHist = new();
-    private const int HistLen = 120;
+    // history for the mini graph at the bottom (ring buffer — never grows past capacity, #18)
+    private readonly Ring _totalHist = new(600);
+    private int _histCap = 120;
 
     // dynamic UI parts
     private readonly TextBlock _totalPct = new();
     private readonly TextBlock _clock = new();
     private readonly StackPanel _memRows = new();
-    private readonly ItemsControl _coresHost = new();
+    private readonly Grid _coresHost = new();
     private readonly LineGraph _graph = new();
 
-    public MainWindow() : base("CpuMeter", new ConfigStore<BaseSettings>("CpuMeter"))
+    // reused per-core row visuals (rebuilt only when the core count changes)
+    private List<(TextBlock idx, UsageBar bar, TextBlock mhz, TextBlock pct)> _rows = new();
+
+    public MainWindow() : base("CpuMeter", new ConfigStore<CpuSettings>("CpuMeter"))
     {
-        _cfg = OpenCfg();
         Title = "CPU Usage";
 
         var root = new StackPanel { Margin = new Thickness(8, 6, 8, 4) };
@@ -45,7 +46,7 @@ public class MainWindow : GadgetWindow
         var title = new TextBlock
         {
             Text = "CPU Usage",
-            Foreground = Theme.TitleFg,
+            Foreground = Theme.TitleFg,          // white + bold (#13)
             FontSize = 15,
             FontWeight = FontWeights.Bold,
             Margin = new Thickness(6, 0, 0, 0),
@@ -53,8 +54,7 @@ public class MainWindow : GadgetWindow
         };
         Grid.SetColumn(title, 1); header.Children.Add(title);
 
-        _totalPct.Foreground = Theme.Green;
-        _totalPct.FontSize = 15;
+        _totalPct.FontSize = 15;                 // percent keeps the usage ramp (#20 clarification)
         _totalPct.FontWeight = FontWeights.Bold;
         _totalPct.HorizontalAlignment = HorizontalAlignment.Right;
         Grid.SetColumn(_totalPct, 2); header.Children.Add(_totalPct);
@@ -62,7 +62,7 @@ public class MainWindow : GadgetWindow
         root.Children.Add(header);
 
         // ── Clock: xxxxMHz ──
-        _clock.Foreground = Theme.Yellow;
+        _clock.Foreground = Theme.Blue;          // value → light blue (#20)
         _clock.FontSize = 12;
         _clock.Margin = new Thickness(0, 1, 0, 4);
         root.Children.Add(_clock);
@@ -76,110 +76,149 @@ public class MainWindow : GadgetWindow
         root.Children.Add(_coresHost);
 
         // ── total history graph ──
-        _graph.Height = 46;
+        _graph.Height = Math.Clamp(Cfg.Data.GraphHeight, 30, 240);
+        _graph.Capacity = _histCap;
         _graph.LegendFormat = v => $"{v:0}%";
         root.Children.Add(_graph);
 
-        OpenOptions = () => { var w = new OptionsWindow(_cfg) { Owner = this }; w.Show(); };
+        // keep a handle so options can toggle the graph live
+
+        OpenOptions = () => { var w = new OptionsWindow(Cfg) { Owner = this }; w.Show(); };
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += (_, _) => Refresh();
         Loaded += (_, _) => Refresh();
         _timer.Start();
 
-        var updater = new UpdateNotifier(this, new UpdateService("cpu-meter", "CpuMeter.exe"));
+        var updater = new UpdateNotifier<CpuSettings>(this, new UpdateService("cpu-meter", "CpuMeter.exe"));
     }
 
-    private static ConfigStore<CpuSettings> OpenCfg() => new("CpuMeter");
+    /// <summary>Options hooks: live graph visibility / height and RAM-Swap rebuild.</summary>
+    public void ApplyGraphVisibility() => _graph.Visibility = Cfg.Data.ShowGraph ? Visibility.Visible : Visibility.Collapsed;
+
+    public void ApplyGraphHeight(double h) => _graph.Height = Math.Clamp(h, 30, 240);
+
+    public void InvalidateMemRows() => _memBuilt = false;
 
     private void Refresh()
     {
         var s = _sampler.Sample();
+
+        // header: total % keeps the green/yellow/red ramp (user clarification)
         _totalPct.Text = $"{s.TotalPct:0}%";
         _totalPct.Foreground = Theme.Usage(s.TotalPct / 100);
-        _clock.Text = $"Clock: {s.ClockMhz}MHz";
+        _clock.Text = $"{s.ClockMhz}MHz";
 
-        // RAM + swap rows (Used / Total + % + bar)
-        _memRows.Children.Clear();
-        AddMemRow("RAM", s.RamUsed, s.RamFree, s.RamTotal);
-        AddMemRow("Swap", s.SwapUsed, s.SwapFree, s.SwapTotal);
+        // RAM/swap rows are rebuilt only when their visibility toggles (cheap otherwise)
+        RebuildMemRows(s);
 
-        // per-core rows: [n] bar  Core n   pct%
-        var panel = new Grid();
-        int i = 0;
-        foreach (var pct in s.CorePct)
+        // per-core rows: [n] bar  mhz   pct% — created once, updated in place (#21)
+        if (_rows.Count != s.Cores.Count) RebuildCoreRows(s.Cores.Count);
+        for (int i = 0; i < s.Cores.Count; i++)
         {
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) });   // [n]
-            row.ColumnDefinitions.Add(new ColumnDefinition());                                 // bar
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });    // name
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });    // pct
-
-            var idx = new TextBlock { Text = $"[{i}]", Foreground = Theme.Muted, FontSize = 10.5, FontFamily = Theme.Mono };
-            Grid.SetColumn(idx, 0); row.Children.Add(idx);
-
-            var bar = new UsageBar { Height = 12, Margin = new Thickness(2, 2, 4, 2), Fraction = pct / 100.0, Color = Theme.CoreColors[i % Theme.CoreColors.Length] };
-            Grid.SetColumn(bar, 1); row.Children.Add(bar);
-
-            string name = i < 10 ? $"{i + 1} Core" : $"Core {i - 9}"; // matches original's odd numbering
-            var lbl = new TextBlock { Text = name, Foreground = Theme.Muted, FontSize = 10.5 };
-            Grid.SetColumn(lbl, 2); row.Children.Add(lbl);
-
-            var p = new TextBlock
-            {
-                Text = $"{pct:0}%",
-                Foreground = Theme.Usage(pct / 100),
-                FontSize = 10.5,
-                HorizontalAlignment = HorizontalAlignment.Right,
-            };
-            Grid.SetColumn(p, 3); row.Children.Add(p);
-
-            panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            row.Margin = new Thickness(0, 0.5, 0, 0.5);
-            Grid.SetRow(row, i);
-            panel.Children.Add(row);
-            i++;
+            var c = s.Cores[i];
+            var row = _rows[i];
+            row.idx.Text = $"{i + 1}";                                   // numbering starts at 1 (#P1)
+            row.bar.Fraction = c.Pct / 100.0;
+            row.mhz.Text = c.ClockMhz > 0 ? $"{c.ClockMhz}" : "—";       // effective clock, no "Core n" text (#P2)
+            row.pct.Text = $"{c.Pct:0}%";
+            row.pct.Foreground = Theme.Usage(c.Pct / 100);               // percent keeps the ramp
         }
-        _coresHost.Items.Clear();
-        _coresHost.Items.Add(panel);
 
-        // graph history
+        // graph history (ring buffer trimmed to the configured capacity — #18)
+        int cap = Math.Clamp((int)Cfg.Data.HistorySeconds, 30, _totalHist.Capacity);
+        if (cap != _histCap) { _histCap = cap; _graph.Capacity = cap; }
         _totalHist.Add(s.TotalPct);
-        if (_totalHist.Count > HistLen) _totalHist.RemoveAt(0);
-        _graph.SetSeries(new List<Series> { new("total", _totalHist, Theme.Hex("#bfffb2")) });
+        var snap = _totalHist.Snapshot();
+        if (snap.Length > _histCap)
+        {
+            var trimmed = new double[_histCap];
+            Array.Copy(snap, snap.Length - _histCap, trimmed, 0, _histCap);
+            snap = trimmed;
+        }
+        _graph.SetSeries(new List<Series> { new("total", snap, Theme.Hex("#bfffb2")) });
     }
 
-    private void AddMemRow(string label, ulong used, ulong free, ulong total)
+    private void RebuildCoreRows(int count)
+    {
+        _coresHost.Children.Clear();
+        _rows.Clear();
+        for (int i = 0; i < count; i++)
+        {
+            var rowGrid = new Grid { Margin = new Thickness(0, 0.5, 0, 0.5) };
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });   // n
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition());                                 // bar
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });    // MHz
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });    // pct
+
+            var idx = new TextBlock { Foreground = Theme.White, FontSize = 10.5, FontFamily = Theme.Mono };   // label → white (#20)
+            Grid.SetColumn(idx, 0); rowGrid.Children.Add(idx);
+
+            var bar = new UsageBar
+            {
+                Height = 12,
+                Margin = new Thickness(2, 2, 4, 2),
+                Color = Theme.CoreColors[i % Theme.CoreColors.Length],
+            };
+            Grid.SetColumn(bar, 1); rowGrid.Children.Add(bar);
+
+            // kind color for the clock-speed label (#P3): cores white, E-cores green, threads light blue
+            var kind = _sampler.KindFor(i);
+            var mhz = new TextBlock
+            {
+                FontSize = 10.5,
+                Foreground = kind switch
+                {
+                    CoreKind.EfficientCore => Theme.Green,
+                    CoreKind.Thread => Theme.Blue,
+                    _ => Theme.White,
+                },
+            };
+            Grid.SetColumn(mhz, 2); rowGrid.Children.Add(mhz);
+
+            var pct = new TextBlock { FontSize = 10.5, HorizontalAlignment = HorizontalAlignment.Right };
+            Grid.SetColumn(pct, 3); rowGrid.Children.Add(pct);
+
+            _coresHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(rowGrid, i);
+            _coresHost.Children.Add(rowGrid);
+            _rows.Add((idx, bar, mhz, pct));
+        }
+    }
+
+    private bool _memBuilt;
+    private TextBlock? _ramLine, _swapLine;
+
+    private void RebuildMemRows(Snapshot s)
+    {
+        if (!_memBuilt)
+        {
+            _memRows.Children.Clear();
+            _ramLine = new TextBlock { FontSize = 11 };
+            _memRows.Children.Add(_ramLine);
+            if (Cfg.Data.ShowSwap)
+            {
+                _swapLine = new TextBlock { FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
+                _memRows.Children.Add(_swapLine);
+            }
+            else _swapLine = null;
+            _memBuilt = true;
+        }
+
+        // labels white (#20), values light blue — percent text keeps the ramp where shown
+        SetMemLine(_ramLine!, "RAM", s.RamUsed, s.RamTotal);
+        if (_swapLine != null && Cfg.Data.ShowSwap) SetMemLine(_swapLine, "Swap", s.SwapUsed, s.SwapTotal);
+    }
+
+    private static void SetMemLine(TextBlock line, string label, ulong used, ulong total)
     {
         double frac = total > 0 ? (double)used / total : 0;
-
-        var g = new Grid();
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
-
-        var left = new StackPanel();
-        var line1 = new TextBlock { FontSize = 11 };
-        line1.Inlines.Add(new Run(label + ": ") { Foreground = Theme.Muted });
-        line1.Inlines.Add(new Run($"{Fmt.Bytes(used)}") { Foreground = Theme.Green });
-        line1.Inlines.Add(new Run(" / ") { Foreground = Theme.Muted });
-        line1.Inlines.Add(new Run($"{Fmt.Bytes(total)}") { Foreground = Theme.Green });
-        left.Children.Add(line1);
-
-        var bar = new UsageBar { Height = 10, Margin = new Thickness(0, 2, 6, 0), Fraction = frac, Color = Theme.Hex("#158000") };
-        left.Children.Add(bar);
-        Grid.SetColumn(left, 0); g.Children.Add(left);
-
-        var pct = new TextBlock
-        {
-            Text = $"{frac * 100:0}%",
-            Foreground = Theme.Usage(frac),
-            FontSize = 11,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Top,
-        };
-        Grid.SetColumn(pct, 1); g.Children.Add(pct);
-
-        g.Margin = new Thickness(0, 1, 0, 3);
-        _memRows.Children.Add(g);
+        line.Inlines.Clear();
+        line.Inlines.Add(new Run(label + ": ") { Foreground = Theme.White });
+        line.Inlines.Add(new Run(Fmt.Bytes(used)) { Foreground = Theme.Blue });
+        line.Inlines.Add(new Run(" / ") { Foreground = Theme.White });
+        line.Inlines.Add(new Run(Fmt.Bytes(total)) { Foreground = Theme.Blue });
+        line.Inlines.Add(new Run($"  ({frac * 100:0}%)") { Foreground = Theme.Usage(frac) });
     }
 }
+

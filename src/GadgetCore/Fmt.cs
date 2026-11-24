@@ -77,5 +77,15 @@ public static class Fmt
         while (v >= 1000 && u < units.Length - 1) { v /= 1000; u++; }
         return $"{v:0.00}{units[u]}";
     }
+
+    /// <summary>Link speed from bits/s: "1Gbps", "100Mbps", "867Mbps".</summary>
+    public static string LinkSpeed(long bitsPerSec)
+    {
+        double v = Math.Max(0, bitsPerSec);
+        if (v >= 1_000_000_000) return $"{v / 1_000_000_000:0.##}Gbps";
+        if (v >= 1_000_000) return $"{v / 1_000_000:0.##}Mbps";
+        if (v > 0) return $"{v / 1_000:0.##}Kbps";
+        return "0bps";
+    }
 }
 

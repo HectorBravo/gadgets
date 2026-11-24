@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -7,7 +7,7 @@ using HectorBravo.Gadgets.Core;
 namespace HectorBravo.Gadgets.DigitalClock;
 
 /// <summary>Digital Clock gadget: big HH:MM[:SS], date line, optional info lines + uptime.</summary>
-public class MainWindow : GadgetWindow
+public class MainWindow : GadgetWindow<ClockSettings>
 {
     private static readonly string[] Months =
     {
@@ -19,7 +19,6 @@ public class MainWindow : GadgetWindow
         "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
     };
 
-    private readonly ConfigStore<ClockSettings> _cfg;
     private readonly DispatcherTimer _timer;
 
     private readonly TextBlock _time = new();
@@ -27,23 +26,25 @@ public class MainWindow : GadgetWindow
     private readonly TextBlock _date = new();
     private readonly TextBlock _info = new();
     private readonly TextBlock _uptime = new();
+    private readonly TextBlock _syncStatus = new();
 
-    public MainWindow() : base("DigitalClock", new ConfigStore<BaseSettings>("DigitalClock"))
+    private bool _syncing;
+
+    public MainWindow() : base("DigitalClock", new ConfigStore<ClockSettings>("DigitalClock"))
     {
-        _cfg = new ConfigStore<ClockSettings>("DigitalClock");
         Title = "Digital Clock";
 
         var root = new StackPanel { Margin = new Thickness(12, 8, 12, 8) };
         ContentHost.Children.Add(root);
 
-        // big time row: HH:MM + smaller :SS (or AM/PM in 12h mode)
+        // big time row: HH:MM + smaller :SS (or AM/PM in 12h mode) — all light blue
         var timeRow = new StackPanel { Orientation = Orientation.Horizontal };
         _time.Foreground = Theme.Blue;
         _time.FontSize = 40;
         _time.FontWeight = FontWeights.Bold;
         timeRow.Children.Add(_time);
 
-        _suffix.Foreground = Theme.Fg;
+        _suffix.Foreground = Theme.Blue;      // seconds share the HH:MM light blue (#C2)
         _suffix.FontSize = 20;
         _suffix.VerticalAlignment = VerticalAlignment.Bottom;
         _suffix.Margin = new Thickness(2, 0, 0, 6);
@@ -66,7 +67,31 @@ public class MainWindow : GadgetWindow
         _uptime.Margin = new Thickness(0, 3, 0, 0);
         root.Children.Add(_uptime);
 
-        OpenOptions = () => { var w = new OptionsWindow(_cfg) { Owner = this }; w.Show(); };
+        // "Sync time" row: icon + text (clickable) + result of the last sync (#C1)
+        var syncRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 6, 0, 0),
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = "Synchronize the system clock with the NTP server (server set in options). Applying needs administrator rights.",
+        };
+        syncRow.Children.Add(new TextBlock { Text = "\uD83D\uDD59", FontSize = 12 });   // 🕙
+        syncRow.Children.Add(new TextBlock
+        {
+            Text = " Sync time",
+            Foreground = Theme.Blue,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        _syncStatus.Foreground = Theme.Muted;
+        _syncStatus.FontSize = 11;
+        _syncStatus.VerticalAlignment = VerticalAlignment.Center;
+        _syncStatus.Margin = new Thickness(6, 0, 0, 0);
+        syncRow.Children.Add(_syncStatus);
+        syncRow.MouseLeftButtonUp += (_, e) => { e.Handled = true; _ = SyncTimeAsync(); };
+        root.Children.Add(syncRow);
+
+        OpenOptions = () => { var w = new OptionsWindow(Cfg) { Owner = this }; w.Show(); };
 
         // refresh a hair after each wall-clock second boundary
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
@@ -74,13 +99,37 @@ public class MainWindow : GadgetWindow
         Loaded += (_, _) => Refresh();
         _timer.Start();
 
-        var updater = new UpdateNotifier(this, new UpdateService("digital-clock", "DigitalClock.exe"));
+        var updater = new UpdateNotifier<ClockSettings>(this, new UpdateService("digital-clock", "DigitalClock.exe"));
+    }
+
+    /// <summary>Query the NTP server and (if allowed) step the system clock.</summary>
+    private async Task SyncTimeAsync()
+    {
+        if (_syncing) return;
+        _syncing = true;
+        _syncStatus.Text = "querying…";
+        try
+        {
+            var r = await SntpClient.QueryAsync(Cfg.Data.NtpServer);
+            var ok = TimeSync.ApplyOffset(r.Offset);
+            _syncStatus.Text = ok
+                ? $"ok ({r.Offset.TotalSeconds:+0.00;-0.00}s)"
+                : $"{r.Offset.TotalSeconds:+0.00;-0.00}s — needs admin to apply";
+        }
+        catch (Exception ex)
+        {
+            _syncStatus.Text = "failed: " + ex.Message;
+        }
+        finally
+        {
+            _syncing = false;
+        }
     }
 
     private void Refresh()
     {
         var s = Sampler.Sample();
-        var opt = _cfg.Data;
+        var opt = Cfg.Data;
         var now = s.Now;
 
         int h24 = now.Hour;
@@ -125,3 +174,4 @@ public class MainWindow : GadgetWindow
         else _uptime.Visibility = Visibility.Collapsed;
     }
 }
+
