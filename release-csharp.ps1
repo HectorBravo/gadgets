@@ -24,6 +24,10 @@ $Root = $PSScriptRoot
 # Optional release notes (markdown) shared by all gadget releases of this stamp.
 $Notes = ''
 if ($NotesFile -and (Test-Path $NotesFile)) { $Notes = Get-Content $NotesFile -Raw }
+if (-not $Notes) { $Notes = "C#/WPF build (stamp $Stamp)." }
+# gh --notes chokes on multiline strings → always pass a temp notes FILE.
+$NotesTmp = Join-Path $env:TEMP "gadgets-release-notes-$Stamp.md"
+Set-Content -LiteralPath $NotesTmp -Value $Notes -Encoding UTF8
 
 # gadget slug -> assembly name
 $Gadgets = [ordered]@{
@@ -74,7 +78,7 @@ foreach ($slug in $Gadgets.Keys) {
     } else {
         $notes = "C#/WPF build of the $asm gadget (stamp $Stamp). Framework-dependent: install the .NET 8 Desktop Runtime to run. Contents: $asm.exe + GadgetCore.dll + runtime manifests.`n`n" + $Notes
     }
-    gh release create $tag $zip --repo $Repo --title "$asm ($slug) - $Stamp$(if ($SelfContained) { ' [self-contained]' })" --notes $notes
+    gh release create $tag $zip --repo $Repo --title "$asm ($slug) - $Stamp$(if ($SelfContained) { ' [self-contained]' })" --notes-file $NotesTmp
     if ($LASTEXITCODE -ne 0) { throw "release $tag FAILED" }
 
     Remove-Item -LiteralPath $zip -ErrorAction Ignore
