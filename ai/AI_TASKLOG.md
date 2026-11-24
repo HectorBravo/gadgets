@@ -19,7 +19,8 @@
 - **Last Updated**: 24-11-2026 10:07:00
 - **Time Spent**: 6h 5m
 - **Branch**: [`feat/ai-gadget-review-round-2`](https://github.com/HectorBravo/gadgets/tree/feat/ai-gadget-review-round-2)
-- **Commit(s)**: [d3f8171](https://github.com/HectorBravo/gadgets/commit/d3f8171), [b210543](https://github.com/HectorBravo/gadgets/commit/b210543), [8b49fbe](https://github.com/HectorBravo/gadgets/commit/8b49fbe)
+- **Commit(s)**: [d3f8171](https://github.com/HectorBravo/gadgets/commit/d3f8171), [b210543](https://github.com/HectorBravo/gadgets/commit/b210543), [8b49fbe](https://github.com/HectorBravo/gadgets/commit/8b49fbe); merged to main as [ae64659](https://github.com/HectorBravo/gadgets/commit/ae64659)
+- **Releases**: self-contained stamp 20261124_1005 — cpu-meter, drives-meter, network-meter, digital-clock (all with full changelog notes)
 - **Blockers**: none
 - **Findings & Notes**:
   - User reviewed the 4 C#/WPF gadgets and reported 21 global issues + gadget-specific issues (Drives 9, Clock 2, Network 5, CPU 3). All implemented in one pass; user asleep → best-judgement choices recorded below for confirmation tomorrow.
