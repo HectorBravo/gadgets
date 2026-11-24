@@ -14,11 +14,16 @@
 #   .\release-csharp.ps1 [-Stamp yyyyMMdd_HHmm] [-SelfContained]
 param(
     [string]$Stamp = (Get-Date -Format 'yyyyMMdd_HHmm'),
-    [switch]$SelfContained
+    [switch]$SelfContained,
+    [string]$NotesFile = ''
 )
 $ErrorActionPreference = 'Stop'
 $Repo = 'HectorBravo/gadgets'
 $Root = $PSScriptRoot
+
+# Optional release notes (markdown) shared by all gadget releases of this stamp.
+$Notes = ''
+if ($NotesFile -and (Test-Path $NotesFile)) { $Notes = Get-Content $NotesFile -Raw }
 
 # gadget slug -> assembly name
 $Gadgets = [ordered]@{
@@ -65,9 +70,9 @@ foreach ($slug in $Gadgets.Keys) {
     if ($exists) { Write-Host "[skip] $tag already exists" -ForegroundColor Gray; continue }
 
     if ($SelfContained) {
-        $notes = "C#/WPF build of the $asm gadget (stamp $Stamp). Self-contained single-file: no .NET install required, runs on any 64-bit Windows. Contents: $asm.exe."
+        $notes = "C#/WPF build of the $asm gadget (stamp $Stamp). Self-contained single-file: no .NET install required, runs on any 64-bit Windows. Contents: $asm.exe.`n`n" + $Notes
     } else {
-        $notes = "C#/WPF build of the $asm gadget (stamp $Stamp). Framework-dependent: install the .NET 8 Desktop Runtime to run. Contents: $asm.exe + GadgetCore.dll + runtime manifests."
+        $notes = "C#/WPF build of the $asm gadget (stamp $Stamp). Framework-dependent: install the .NET 8 Desktop Runtime to run. Contents: $asm.exe + GadgetCore.dll + runtime manifests.`n`n" + $Notes
     }
     gh release create $tag $zip --repo $Repo --title "$asm ($slug) - $Stamp$(if ($SelfContained) { ' [self-contained]' })" --notes $notes
     if ($LASTEXITCODE -ne 0) { throw "release $tag FAILED" }

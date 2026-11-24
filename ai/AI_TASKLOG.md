@@ -4,7 +4,7 @@
 
 | Created | Task | Status | Type | Subtasks | Time Spent | Blockers |
 |---------|------|--------|------|----------|------------|----------|
-| 24-11-2026 04:21:45 | [T3: Review round 2 — 21 global + 17 gadget-specific fixes](#task-t3-review-round-2--21-global--17-gadget-specific-fixes) | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">in_progress</span> | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 0/14 | 0m | none |
+| 24-11-2026 04:21:45 | [T3: Review round 2 — 21 global + 17 gadget-specific fixes](#task-t3-review-round-2--21-global--17-gadget-specific-fixes) | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">in_progress</span> | <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span> | 12/14 | 5h 25m | none |
 | 23-11-2026 01:21:00 | [T1: Rust desktop gadgets (cpu/drives/network/clock)](#task-t1-rust-desktop-gadgets-cpudrivesnetworkclock) | <span style="background-color:#da3633;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">blocked</span> | <span style="background-color:#22863a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">feat</span> | 12/14 | 7h 30m | superseded — Rust removed, see [T2](#task-t2-migrate-all-4-gadgets-rust--csharpwpf) (done) |
 
 > ✅ **1 completed task(s)** — [View completed tasks](#completed-tasks)
@@ -16,8 +16,8 @@
 - **Status**: <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">in_progress</span>
 - **Type**: <span style="background-color:#0969da;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px;">refactor</span>
 - **Created**: 24-11-2026 04:21:45
-- **Last Updated**: 24-11-2026 04:30:00
-- **Time Spent**: 8m
+- **Last Updated**: 24-11-2026 09:50:00
+- **Time Spent**: 5h 25m
 - **Branch**: [`feat/ai-gadget-review-round-2`](https://github.com/HectorBravo/gadgets/tree/feat/ai-gadget-review-round-2)
 - **Commit(s)**: pending
 - **Blockers**: none
@@ -43,18 +43,18 @@
 
 ### Subtasks / Plan
 
-- [ ] S1 — GadgetCore: Theme (white bold title, white labels, light-blue values, keep Usage() ramp) + light menu/window styling (#3, #13, #20)
-- [ ] S2 — GadgetCore: unify ConfigStore<T:BaseSettings> (fix double-store overwrite), defaults AlwaysOnTop=false / Opacity=1.0 / opaque panel, ResizeMode=NoResize + SizeToContent, fixed width, LayoutTransform scale → window resizes (#1, #2, #5, #8, #11)
-- [ ] S3 — GadgetCore: live "magnet" snap with small separation gap during drag (#4)
-- [ ] S4 — GadgetCore: LineGraph time-proportional x-axis + ring buffers + graph-height option (#6, #10, #18), freeze fixes (#19)
-- [ ] S5 — GadgetCore: shared OptionsWindow base (light theme, no scrollbars, uniform tab size) + LabeledSlider control (#7, #9)
-- [ ] S6 — GadgetCore: update-available flashing light-blue bottom line + apply/relaunch (#16), immediate menu open (#15)
-- [ ] S7 — DrivesMeter: "C" without colon; per-drive graphs (default on); aggregate reads+writes graph plotting + Aggr Reads/Writes rows; fix 0 rates (#D1–#D4)
-- [ ] S8 — DrivesMeter: rate unit Auto/GB/s/MB/s/KB/s (4 sig digits w/ dot); bar under Free line aligned F→%; read green / write yellow (text+icon+lines); label size (#D5–#D9)
-- [ ] S9 — DigitalClock: SNTP "Sync time" icon+text, NTP server option (pool.ntp.org); seconds light blue like HH:MM (#C1, #C2)
-- [ ] S10 — NetworkMeter: link speed own line in light blue; rate unit setting; upload green / download yellow; All/None + ordering; Ext IP before first interface (#N1–#N5)
-- [ ] S11 — CpuMeter: cores numbered from 1, "Core n" text replaced by per-core effective MHz; core/thread/E-core label colors (#P1–#P3)
-- [ ] S12 — Efficiency pass: reuse visual tree instead of rebuilding each tick, ring buffers, cheap sampling (#18, #19, #21)
+- [x] S1 — GadgetCore: Theme (white bold title, white labels, light-blue values, keep Usage() ramp) + light menu/window styling (#3, #13, #20)
+- [x] S2 — GadgetCore: unify ConfigStore<T:BaseSettings> (fix double-store overwrite), defaults AlwaysOnTop=false / Opacity=1.0 / opaque panel, ResizeMode=NoResize + SizeToContent, fixed width, LayoutTransform scale → window resizes (#1, #2, #5, #8, #11)
+- [x] S3 — GadgetCore: live "magnet" snap with small separation gap during drag (#4)
+- [x] S4 — GadgetCore: LineGraph time-proportional x-axis + ring buffers + graph-height option (#6, #10, #18), freeze fixes (#19)
+- [x] S5 — GadgetCore: shared OptionsWindow base (light theme, no scrollbars, uniform tab size) + LabeledSlider control (#7, #9)
+- [x] S6 — GadgetCore: update-available flashing light-blue bottom line + apply/relaunch (#16), immediate menu open (#15)
+- [x] S7 — DrivesMeter: "C" without colon; per-drive graphs (default on); aggregate reads+writes graph plotting + Aggr Reads/Writes rows; fix 0 rates (#D1–#D4)
+- [x] S8 — DrivesMeter: rate unit Auto/GB/s/MB/s/KB/s (4 sig digits w/ dot); bar under Free line aligned F→%; read green / write yellow (text+icon+lines); label size (#D5–#D9)
+- [x] S9 — DigitalClock: SNTP "Sync time" icon+text, NTP server option (pool.ntp.org); seconds light blue like HH:MM (#C1, #C2)
+- [x] S10 — NetworkMeter: link speed own line in light blue; rate unit setting; upload green / download yellow; All/None + ordering; Ext IP before first interface (#N1–#N5)
+- [x] S11 — CpuMeter: cores numbered from 1, "Core n" text replaced by per-core effective MHz; core/thread/E-core label colors (#P1–#P3)
+- [x] S12 — Efficiency pass: reuse visual tree instead of rebuilding each tick, ring buffers, cheap sampling (#18, #19, #21)
 - [ ] S13 — Build all 4 Release clean + smoke run
 - [ ] S14 — Docs/CHANGELOG, commit+push, publish releases (self-contained), merge to main, delete AI branches
 

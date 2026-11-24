@@ -1,5 +1,6 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 
 namespace HectorBravo.Gadgets.Core;
@@ -23,6 +24,18 @@ public static class MenuStyle
 
     private static Color Hex(string s) => (Color)ColorConverter.ConvertFromString(s);
     private static Brush Frozen(string s) { var b = new SolidColorBrush(Hex(s)); b.Freeze(); return b; }
+
+    /// <summary>MenuItem.Role value (MenuRole is internal in WPF — resolve it reflectively, cached).</summary>
+    private static readonly Lazy<object[]> _roles = new(() =>
+    {
+        var t = typeof(MenuItem).GetProperty("Role")!.PropertyType;   // internal enum MenuRole
+        var vals = Enum.GetValues(t);
+        var arr = new object[vals.Length];
+        for (int i = 0; i < vals.Length; i++) arr[i] = vals.GetValue(i)!;
+        return arr;
+    });
+
+    private static object Role(string name) => Array.Find(_roles.Value, v => v.ToString() == name)!;
 
     /// <summary>Build the light-theme resource dictionary and merge it app-wide.</summary>
     public static void Apply(Application app)
@@ -213,24 +226,27 @@ public static class MenuStyle
         t.Triggers.Add(ck);
 
         // Role: submenu parent — arrow + open popup
-        var roleSubHeader = new Trigger { Property = MenuItem.RoleProperty, Value = "SubmenuHeader" };
+        // Role: submenu parent — arrow + open popup (enum values are boxed via the local helper)
+        var roleSubHeader = new Trigger { Property = MenuItem.RoleProperty, Value = Role("SubmenuHeader") };
         roleSubHeader.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Visible, "subArrow"));
         roleSubHeader.Setters.Add(new Setter(System.Windows.Controls.Primitives.Popup.IsOpenProperty, true, "PART_Popup"));
         t.Triggers.Add(roleSubHeader);
 
         // Role: submenu leaf — its popup is hosted by the parent menu, not here
-        var roleSubItem = new Trigger { Property = MenuItem.RoleProperty, Value = "SubmenuItem" };
+        var roleSubItem = new Trigger { Property = MenuItem.RoleProperty, Value = Role("SubmenuItem") };
         roleSubItem.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Collapsed, "PART_Popup"));
         t.Triggers.Add(roleSubItem);
 
         // Role: top-level header — no popup needed for our menus
-        var roleTop = new Trigger { Property = MenuItem.RoleProperty, Value = "TopLevelHeader" };
+        var roleTop = new Trigger { Property = MenuItem.RoleProperty, Value = Role("TopLevelHeader") };
         roleTop.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Collapsed, "PART_Popup"));
         t.Triggers.Add(roleTop);
 
         return t;
     }
 }
+
+
 
 
 
