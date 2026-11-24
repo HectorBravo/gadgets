@@ -1,5 +1,8 @@
 namespace HectorBravo.Gadgets.Core;
 
+/// <summary>How a rate (bytes/s) is rendered.</summary>
+public enum RateUnit { Auto = 0, GBps = 1, MBps = 2, KBps = 3 }
+
 /// <summary>Formatting helpers matching the original gadgets' style.</summary>
 public static class Fmt
 {
@@ -23,6 +26,47 @@ public static class Fmt
         return u == 0 ? $"{v:0}{units[u]}" : $"{v:0.000}{units[u]}";
     }
 
+    /// <summary>
+    /// Rate with a fixed unit choice: always 4 significant digits with exactly one dot
+    /// ("4.345GB/s", "43.45MB/s", "434.5KB/s"). Auto picks the unit that keeps the
+    /// value in [1, 1000).
+    /// </summary>
+    public static string RateU(double bytesPerSec, RateUnit unit)
+    {
+        double v = Math.Max(0, bytesPerSec);
+        // auto: pick largest unit ≤ value (KB floor so small traffic still shows decimals)
+        if (unit == RateUnit.Auto)
+        {
+            if (v >= 1024UL * 1024 * 1024) unit = RateUnit.GBps;
+            else if (v >= 1024 * 1024) unit = RateUnit.MBps;
+            else unit = RateUnit.KBps;
+        }
+
+        double div = unit switch
+        {
+            RateUnit.GBps => 1024.0 * 1024 * 1024,
+            RateUnit.MBps => 1024.0 * 1024,
+            _ => 1024.0,
+        };
+        string suffix = unit switch
+        {
+            RateUnit.GBps => "GB/s",
+            RateUnit.MBps => "MB/s",
+            _ => "KB/s",
+        };
+
+        double n = v / div;
+        // exactly 4 significant digits with one decimal dot: d.ddd / dd.dd / ddd.d
+        string text = n switch
+        {
+            < 10 => n.ToString("0.000"),
+            < 100 => n.ToString("00.00"),
+            < 1000 => n.ToString("000.0"),
+            _ => n.ToString("0000"),
+        };
+        return text + suffix;
+    }
+
     /// <summary>"367.79Mbit/s", "0.059MB/s" (network meter mixed style).</summary>
     public static string BitRate(double bytesPerSec)
     {
@@ -34,3 +78,4 @@ public static class Fmt
         return $"{v:0.00}{units[u]}";
     }
 }
+

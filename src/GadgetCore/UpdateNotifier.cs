@@ -1,27 +1,29 @@
-using System.Windows;
-using System.Windows.Threading;
+﻿using System.Windows.Threading;
 
 namespace HectorBravo.Gadgets.Core;
 
 /// <summary>
-/// Wires an UpdateService to a GadgetWindow: periodic GitHub checks + the
-/// flashing "New version available" line in the common right-click menu.
+/// Wires an UpdateService to a GadgetWindow&lt;T&gt;: periodic GitHub checks + the
+/// flashing light-blue "New version available (stamp) — click to update" line at the
+/// BOTTOM of the gadget body (the window grows by that line's height only while it is
+/// visible). Clicking applies the update: download → swap helper → relaunch.
 /// </summary>
-public sealed class UpdateNotifier
+public sealed class UpdateNotifier<T> where T : BaseSettings, new()
 {
-    private readonly GadgetWindow _window;
+    private readonly GadgetWindow<T> _host;
     private readonly UpdateService _svc;
     private readonly DispatcherTimer _timer;
     private UpdateService.UpdateInfo? _info;
 
-    public UpdateNotifier(GadgetWindow window, UpdateService svc)
+    public UpdateNotifier(GadgetWindow<T> host, UpdateService svc)
     {
-        _window = window;
+        _host = host;
         _svc = svc;
 
-        window.UpdateLineProvider = () =>
-            _info == null ? null : $"New version available ({_info.Tag.Split('/')[1]}) — click to update";
-        window.OnUpdateClick = async () =>
+        host.UpdateLineProvider = () => _info == null
+            ? null
+            : $"New version available ({_info.Tag.Split('/')[1]}) — click to update";
+        host.OnUpdateClick = async () =>
         {
             var info = _info;
             if (info == null) return;
@@ -42,29 +44,10 @@ public sealed class UpdateNotifier
             if (info != null && !Equals(info, _info))
             {
                 _info = info;
-                FlashOnce();
+                _host.InvalidateUpdateLine();
             }
         }
         catch { /* silent */ }
     }
-
-    /// <summary>One-shot attention pulse on the window border when an update lands.</summary>
-    private void FlashOnce()
-    {
-        try
-        {
-            var panel = (System.Windows.Controls.Border)_window.Content;
-            var anim = new System.Windows.Media.Animation.ColorAnimationUsingKeyFrames();
-            foreach (var (sec, c) in new (double, Color)[]
-            {
-                (0.0, Theme.Hex("#46506e")), (0.5, Theme.Hex("#87cefa")),
-                (1.0, Theme.Hex("#46506e")), (1.5, Theme.Hex("#87cefa")), (2.0, Theme.Hex("#46506e")),
-            })
-                anim.KeyFrames.Add(new System.Windows.Media.Animation.LinearColorKeyFrame(c, TimeSpan.FromSeconds(sec)));
-            anim.Duration = TimeSpan.FromSeconds(2);
-            var brush = panel.BorderBrush as System.Windows.Media.SolidColorBrush;
-            brush?.BeginAnimation(System.Windows.Media.SolidColorBrush.ColorProperty, anim);
-        }
-        catch { /* cosmetic */ }
-    }
 }
+

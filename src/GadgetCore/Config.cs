@@ -8,16 +8,21 @@ public class BaseSettings
 {
     public double? X { get; set; }
     public double? Y { get; set; }
-    public double Width { get; set; } = 250;
-    public double Height { get; set; } = 430;
-    public bool AlwaysOnTop { get; set; } = true;
-    /// UI scale: 1.0, 1.25, 1.5 or 2.0 (LayoutTransform on the root).
+    /// UI scale: 1.0, 1.25, 1.5 or 2.0 (LayoutTransform on the root → resizes the window).
     public double Scale { get; set; } = 1.0;
-    /// Window opacity: 0.2 … 1.0.
-    public double Opacity { get; set; } = 0.85;
+    /// Window opacity: 0.2 … 1.0 (the panel itself is fully opaque).
+    public double Opacity { get; set; } = 1.0;
+    /// Gadgets are NOT always on top by default.
+    public bool AlwaysOnTop { get; set; } = false;
+    /// Graph height in DIP (all gadgets that draw graphs).
+    public double GraphHeight { get; set; } = 60;
 }
 
-/// <summary>JSON config persisted at %APPDATA%\&lt;AppName&gt;\config.json (settings only).</summary>
+/// <summary>
+/// JSON config persisted at %APPDATA%\&lt;AppName&gt;\config.json. ONE store per gadget
+/// (shared by the base window and the gadget) so nothing overwrites another writer.
+/// Every change is saved immediately (Save() right after mutating Data).
+/// </summary>
 public class ConfigStore<T> where T : new()
 {
     private static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
@@ -50,8 +55,11 @@ public class ConfigStore<T> where T : new()
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-            File.WriteAllText(Path, JsonSerializer.Serialize(Data, Opts));
+            var tmp = Path + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(Data, Opts));
+            File.Move(tmp, Path, overwrite: true);   // atomic-ish: config never lost half-written
         }
         catch { /* never crash a gadget over its config file */ }
     }
 }
+
